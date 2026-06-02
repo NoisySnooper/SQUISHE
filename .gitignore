@@ -1,0 +1,16 @@
+# build artifacts
+build/
+dist/
+build-env/
+*.spec.bak
+
+# python
+__pycache__/
+*.pyc
+
+# runtime settings (per-user)
+.quicklook_settings.json
+
+# dev scratch
+_*.py
+_test_out/
