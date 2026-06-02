@@ -5,6 +5,8 @@ diamond-anvil-cell (DAC) samples at NSLS-II beamline 22-IR-1. It concatenates
 the four raw grating segments of each measurement, computes absorbance, and
 plots the results with publication-ready 2D and 3D options.
 
+![DAC Quick-Look tool — 3D ridge (joyplot) view](docs/screenshot.png)
+
 ## What it does
 
 - Reads raw spectrometer segment files (`vis_{DAC}_{Sample}_{Pressure}[...].001..004`).
