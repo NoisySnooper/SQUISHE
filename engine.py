@@ -68,13 +68,16 @@ def parse_segment_filename(fname):
     if rest and rest[0].lower() in ("bg", "s"):
         meas = "background" if rest[0].lower() == "bg" else "sample"
         rest = rest[1:]
-    if rest and rest[0].isdigit():
-        rep = int(rest[0])
-        rest = rest[1:]
+    # rep (_2/_3) and branch (_C/_D) may appear in EITHER order:
+    # canonical is [_C|_D][_2|_3]; the old [_2|_3][_C|_D] is still accepted.
     branch = None
-    if rest and rest[0].upper() in ("C", "D"):
-        branch = rest[0].upper()        # optional compression/decompression tag
-        rest = rest[1:]
+    for _ in range(2):
+        if rest and rest[0].isdigit():
+            rep = int(rest[0]); rest = rest[1:]
+        elif rest and rest[0].upper() in ("C", "D"):
+            branch = rest[0].upper(); rest = rest[1:]
+        else:
+            break
     if rest:
         return {"skip": True, "reason": "unrecognized trailing token '%s'"
                 % "_".join(rest), "raw": raw}

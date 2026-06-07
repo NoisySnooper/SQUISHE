@@ -7,6 +7,29 @@ plots the results with publication-ready 2D and 3D options.
 
 ![DAC Quick-Look tool — 3D ridge (joyplot) view](docs/screenshot.png)
 
+## What's new in v1.1
+
+- Even rank spacing now OFF by default; 3D detail default lowered to 1000 for
+  smoother rotation on laptops.
+- Offset/step "Auto" button: evenly spaces ridges across the pressure axis in
+  view (3D).
+- Inspect-one-pressure now works while 3D ridge is selected (shows the 2D
+  channel view instead of a meaningless single ridge).
+- "No raw background" toggle (zeroes raw opacity, restores on untick).
+- Grid and reference markers unified into one consistent styling layout
+  (color / pattern / width / opacity); markers gained an opacity control.
+- Per-item text sizes: title, axis labels, axis tick text, legend, and colorbar
+  each have their own size box (the single global size control was removed).
+- Colorbar customization: label text, orientation, label/tick size, thickness,
+  tick count.
+- "Legend opacity" renamed to "Legend bg opacity"; added a legend size control.
+- Cambria headers on the three panes; bordered "Quick access" strip.
+- Readout + click-to-read moved into Plot mode.
+- Run progress bar.
+- Performance: debounced redraws + a "Performance mode" toggle (off by default)
+  that decimates 3D harder and skips the raw ghost. 2D and exports are
+  unaffected.
+
 ## What it does
 
 - Reads raw spectrometer segment files (`vis_{DAC}_{Sample}_{Pressure}[...].001..004`).

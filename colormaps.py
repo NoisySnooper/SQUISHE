@@ -37,8 +37,20 @@ _TOL_BRIGHT = ["#4477AA", "#EE6677", "#228833", "#CCBB44",
 _TOL_MUTED = ["#332288", "#88CCEE", "#44AA99", "#117733", "#999933",
               "#DDCC77", "#CC6677", "#882255", "#AA4499"]
 
-_CONTINUOUS = ["batlow", "roma", "hawaii", "lajolla",
-               "viridis", "inferno", "plasma", "cividis", "turbo"]
+_CONTINUOUS = [
+    # perceptually uniform (recommended for publication)
+    "batlow", "roma", "hawaii", "lajolla",
+    "viridis", "inferno", "plasma", "magma", "cividis", "turbo",
+    # grayscale + single-hue sequential
+    "Greys", "gray", "bone", "copper", "hot", "afmhot", "cubehelix",
+    "Blues", "Greens", "Oranges", "Reds", "Purples",
+    # multi-hue sequential
+    "YlOrRd", "YlGnBu", "BuPu", "GnBu", "PuBuGn", "gist_earth", "terrain",
+    # diverging
+    "coolwarm", "RdBu", "RdYlBu", "Spectral", "bwr", "seismic",
+    "PiYG", "PRGn", "BrBG",
+    # cyclic / misc
+    "twilight", "hsv", "nipy_spectral"]
 _CATEGORICAL = {"batlowS": None, "tab10": None, "tab20": None,
                 "okabeito": _OKABE_ITO, "tolbright": _TOL_BRIGHT,
                 "tolmuted": _TOL_MUTED}
@@ -92,8 +104,13 @@ def color_for(name, pressure_val, pmin, pmax, rank, n_traces):
         c = cols[rank % len(cols)]
         return to_rgba(c)
     cmap = _continuous_cmap(name)
-    if pmax > pmin:
-        frac = (pressure_val - pmin) / (pmax - pmin)
+    # A reversed range is signalled by pmin > pmax (callers swap the bounds).
+    reversed_ = pmin > pmax
+    lo, hi = (pmax, pmin) if reversed_ else (pmin, pmax)
+    if hi > lo:
+        frac = (pressure_val - lo) / (hi - lo)
+        if reversed_:
+            frac = 1.0 - frac
     else:
         frac = 0.5
     return cmap(float(np.clip(frac, 0.0, 1.0)))
