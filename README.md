@@ -7,6 +7,23 @@ plots the results with publication-ready 2D and 3D options.
 
 ![DAC Quick-Look tool — 3D ridge (joyplot) view](docs/screenshot.png)
 
+## What's new in v1.2
+
+- **FFT-notch defringe** (contributed by [Matthew Diamond](https://github.com/matthewrdiamond)):
+  - Enable toggle and a notch-width slider.
+  - Defringed absorbance flows through every plot.
+  - Per-pressure "Defringe report" QC log (detected n·t and p-value).
+  - "Export defringed CSV".
+  - Run also writes `*_absorbance_notch.csv` when defringe is enabled.
+- **3D ridge enhancements:**
+  - Box stretch X/Y/Z (rectangular box without respacing the data).
+  - Appearance selector (Walls + traces / Walls only / Traces only).
+  - Color traces by colormap.
+  - Camera presets (Iso / Front / Side / Top).
+  - Back-wall / floor projection.
+  - Independent 3D line width.
+  - Real-GPa tick labels on the pressure axis.
+
 ## What's new in v1.1
 
 - Even rank spacing now OFF by default; 3D detail default lowered to 1000 for
@@ -74,11 +91,17 @@ code-signing certificate.
 |------|---------|
 | `app.py` | GUI, plotting, all controls |
 | `engine.py` | parse / concatenate / absorbance / CSV output |
+| `defringe.py` | FFT-notch defringe (interference-fringe removal) |
 | `smoothing.py` | 5-step smoothing pipeline |
 | `colormaps.py` | Crameri + matplotlib colormaps |
 | `decomp.py` | known decompression-pressure sets |
 | `beamline_tool.spec`, `version_info.txt` | PyInstaller build config |
 | `requirements.txt` | dependencies |
+
+## Credits
+
+- FFT-notch defringe (`defringe.py`) contributed by
+  [Matthew Diamond](https://github.com/matthewrdiamond).
 
 ## License
 

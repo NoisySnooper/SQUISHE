@@ -41,6 +41,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (enables 3d projection)
 
 import engine
 import smoothing
+import defringe
 import colormaps
 import decomp
 
@@ -58,7 +59,7 @@ FONTS = ["DejaVu Sans", "DejaVu Serif", "Times New Roman", "Arial",
 LEGEND_LOCS = ["best", "upper right", "upper left", "lower left",
                "lower right", "center right", "outside right"]
 
-APP_VERSION = "v1.1"
+APP_VERSION = "v1.2"
 APP_CODENAME = "Olivine"
 APP_TITLE = "Beamline DAC Data Tool  (NSLS-II 22-IR-1)  --  Dr. Lee's Lab"
 
@@ -130,6 +131,12 @@ PANEL_GUIDE = (
     "  Fill opacity - transparency of each wall. Elev/Azim - camera angle.\n"
     "  Z clip - clamp the height axis (blank = auto min..99th pct) so\n"
     "    saturated spikes don't blow out the scale.\n\n"
+    "DEFRINGE\n"
+    "  Enable (FFT notch) - remove diamond-anvil interference fringes by\n"
+    "    notching the dominant auto-detected fringe out of the raw Sample and\n"
+    "    Background counts, then recomputing absorbance. Notch width default\n"
+    "    15%. When enabled, Run also writes {stem}_absorbance_notch.csv files;\n"
+    "    'Export defringed CSV' writes them anytime.\n\n"
     "SMOOTHING\n"
     "  Show smoothed/raw. 'Smoothing settings' exposes the 5-step filter\n"
     "  (cutoff, density, Hampel, split Savitzky-Golay, jump) matching the\n"
@@ -236,6 +243,7 @@ class App:
         self.dvars = {}           # label -> BooleanVar (is decompression)
         self.smooth_cache = {}
         self.smooth_params = dict(smoothing.DEFAULTS)
+        self.notch_cache = {}     # label -> {'absorbance','sample','background'}
         self.last_out_dir = None
         self.settings = self._load_settings()
         _tm = self.settings.get("theme", "dark" if self.settings.get("dark") else "light")
@@ -535,7 +543,8 @@ class App:
         "wf3d_elev": "elev", "wf3d_azim": "azim", "wf3d_zoom": "zoom",
         "lw": "line width", "autoscale": "auto-limits", "tick_dir": "tick dir",
         "legend_on": "legend", "colorbar_on": "colorbar", "grid_on": "grid",
-        "show_smooth": "show smoothed",
+        "show_smooth": "show smoothed", "show_notch": "defringe",
+        "notch_width": "notch width %",
     }
 
     def _log_changes(self, a, b):
@@ -855,7 +864,8 @@ class App:
         """Enforce an intuitive top-to-bottom order for the control sections."""
         order = ["Plot mode", "Waterfall (2D / 3D plotting)", "3D ridge options",
                  "X axis", "Axis limits", "Axes, ticks & guides", "Axis ticks",
-                 "Markers & guides", "Display", "Aspect ratio (2D)", "Smoothing",
+                 "Markers & guides", "Display", "Aspect ratio (2D)", "Defringe",
+                 "Smoothing",
                  "Title / labels / legend", "Font", "Presets",
                  "Traces  (check = show,  D = decompression)", "Export",
                  "Journal / figure"]
@@ -1392,6 +1402,34 @@ class App:
 
         self._build_3d_opts(r)        # 3D ridge options live right under Waterfall
 
+        # --- Defringe (FFT notch) ---
+        dfg = self._group(r, "Defringe")
+        self.show_notch = tk.BooleanVar(value=False)
+        ncb = ttk.Checkbutton(dfg, text="Enable (FFT notch defringe)",
+                              variable=self.show_notch, command=self._toggle_notch)
+        ncb.pack(anchor="w")
+        Tooltip(ncb, "Remove diamond-anvil interference fringes by notching the "
+                     "dominant auto-detected fringe (n*t over 15-100 um) out of "
+                     "the raw Sample and Background counts independently, then "
+                     "recomputing absorbance. Channels with no confident fringe "
+                     "are left unchanged. When enabled, Run also writes "
+                     "{stem}_absorbance_notch.csv files.")
+        self.notch_width = tk.DoubleVar(value=defringe.NOTCH_WIDTH_FRAC * 100.0)
+        nwsc, _nwe = self._slider_row(dfg, "Notch width %", self.notch_width,
+                                      1.0, 50.0, "%.0f")
+        Tooltip(nwsc, "Gaussian-notch half-width as a percent of the fringe "
+                      "frequency (default 15%). Wider removes more around the "
+                      "fringe; right-click resets.")
+        # Width changes invalidate the cached defringe + downstream smoothing.
+        self.notch_width.trace_add(
+            "write", lambda *_: (self.notch_cache.clear(), self.smooth_cache.clear()))
+        drb = ttk.Button(dfg, text="Defringe report",
+                         command=self._defringe_report)
+        drb.pack(fill="x", pady=(3, 0))
+        Tooltip(drb, "Log which pressures have a detected fringe (Sample / "
+                     "Background), the fitted n*t in um, and the detection "
+                     "p-value, at the current notch width. Good for QC.")
+
         # --- Smoothing ---
         sm = self._group(r, "Smoothing")
         self.show_smooth = tk.BooleanVar()
@@ -1706,6 +1744,14 @@ class App:
         ttk.Label(cr2, text="nm").pack(side="left")
         ttk.Button(ex, text="Export smoothed CSV...",
                    command=self._export_smoothed).pack(fill="x", pady=2)
+        edb = ttk.Button(ex, text="Export defringed CSV...",
+                         command=self._export_defringed)
+        edb.pack(fill="x", pady=2)
+        Tooltip(edb, "Write one {stem}_absorbance_notch.csv per loaded pressure "
+                     "into a chosen folder: FFT-notch defringes the raw Sample "
+                     "and Background counts (at the current Notch width %) and "
+                     "recomputes absorbance. Works whether or not the Defringe "
+                     "display toggle is on.")
 
         self._build_journal(r)
         # quick-access strip for the most-used controls (always visible on top)
@@ -1716,6 +1762,8 @@ class App:
                      values=["off", "2D stacked", "3D ridge"]).pack(side="left")
         ttk.Checkbutton(b1, text="smooth", variable=self.show_smooth,
                         command=self._redraw).pack(side="left", padx=(5, 0))
+        ttk.Checkbutton(b1, text="defringe", variable=self.show_notch,
+                        command=self._toggle_notch).pack(side="left", padx=(5, 0))
         ttk.Label(b1, text="lw").pack(side="left", padx=(5, 0))
         lwe = ttk.Entry(b1, textvariable=self.lw, width=4); lwe.pack(side="left")
         lwe.bind("<Return>", lambda e: self._redraw())
@@ -1797,6 +1845,13 @@ class App:
         self.wf3d_elev.set(22); self.wf3d_azim.set(-60); self.wf3d_zoom.set(1.0)
         self._redraw()
 
+    def _cam_preset(self, elev, azim):
+        self.wf3d_elev.set(elev); self.wf3d_azim.set(azim); self._redraw()
+
+    def _reset_stretch(self):
+        self.wf3d_sx.set(1.0); self.wf3d_sy.set(1.0); self.wf3d_sz.set(1.0)
+        self._redraw()
+
     def _dlist_help(self):
         messagebox.showinfo(
             "Load D list - accepted format",
@@ -1837,12 +1892,31 @@ class App:
         Tooltip(evck, "Space ridges evenly along the pressure axis (1,2,3...) "
                       "regardless of the real GPa gaps, so crowded pressures stay "
                       "readable. Uncheck to place each ridge at its true pressure.")
-        self.wf3d_fill = tk.BooleanVar(value=True)
-        fcb = ttk.Checkbutton(td, text="Filled ridges (joyplot)",
-                              variable=self.wf3d_fill, command=self._redraw)
-        fcb.pack(anchor="w")
-        Tooltip(fcb, "Fill under each curve and draw front-to-back so "
-                     "near ridges hide far ones. Removes the clutter.")
+        # appearance: walls (filled ridges), walls only, or traces only
+        self.wf3d_fill = tk.BooleanVar(value=True)    # derived from the selector
+        self.wf3d_lines = tk.BooleanVar(value=True)   # draw the ridge outline
+        self.wf3d_look = tk.StringVar(value="Walls + traces")
+        lkr = ttk.Frame(td); lkr.pack(fill="x")
+        ttk.Label(lkr, text="3D look").pack(side="left")
+        ttk.Combobox(lkr, textvariable=self.wf3d_look, state="readonly", width=14,
+                     values=["Walls + traces", "Walls only", "Traces only"]
+                     ).pack(side="left", padx=(3, 0))
+        def _apply_look(*_a):
+            lk = self.wf3d_look.get()
+            self.wf3d_fill.set(lk in ("Walls + traces", "Walls only"))
+            self.wf3d_lines.set(lk in ("Walls + traces", "Traces only"))
+            self._redraw()
+        self.wf3d_look.trace_add("write", _apply_look)
+        Tooltip(lkr, "Walls + traces: filled joyplot ridges with outlines. "
+                     "Walls only: filled, no outline. Traces only: outlines "
+                     "with no fill (clean line joyplot).")
+        self.wf3d_color_traces = tk.BooleanVar(value=True)
+        ctc = ttk.Checkbutton(td, text="Color traces by colormap",
+                              variable=self.wf3d_color_traces,
+                              command=self._redraw)
+        ctc.pack(anchor="w")
+        Tooltip(ctc, "Colour the ridge outlines with the trace colormap instead "
+                     "of flat black/white. Pairs well with Traces only.")
         self.wf3d_clean = tk.BooleanVar(value=True)
         clck = ttk.Checkbutton(td, text="Clean panes (white, faint grid)",
                                variable=self.wf3d_clean, command=self._redraw)
@@ -1863,6 +1937,50 @@ class App:
         self.wf3d_zoom = tk.DoubleVar(value=1.0)
         scz, _z = self._slider_row(td, "Zoom", self.wf3d_zoom, 0.5, 2.0, "%.2f")
         Tooltip(scz, "Zoom the 3D view in/out (camera distance).")
+        # camera quick-presets
+        cpr = ttk.Frame(td); cpr.pack(fill="x", pady=(2, 0))
+        ttk.Label(cpr, text="View").pack(side="left")
+        for _t, _e, _a in [("Iso", 22, -60), ("Front", 8, -90),
+                           ("Side", 8, 0), ("Top", 89, -90)]:
+            ttk.Button(cpr, text=_t, width=5,
+                       command=lambda e=_e, a=_a: self._cam_preset(e, a)
+                       ).pack(side="left", padx=(2, 0))
+        Tooltip(cpr, "Snap the camera to a standard angle, then fine-tune with "
+                     "the Elevation / Azimuth sliders above.")
+        # box stretch: make the 3D box a rectangle without respacing the data
+        self.wf3d_sx = tk.DoubleVar(value=1.0)
+        self.wf3d_sy = tk.DoubleVar(value=1.0)
+        self.wf3d_sz = tk.DoubleVar(value=1.0)
+        stx = ttk.Frame(td); stx.pack(fill="x", pady=(2, 0))
+        ttk.Label(stx, text="Stretch").pack(side="left")
+        for _lbl, _v in [("X", self.wf3d_sx), ("Y", self.wf3d_sy),
+                         ("Z", self.wf3d_sz)]:
+            ttk.Label(stx, text=_lbl).pack(side="left", padx=(4, 0))
+            sp = ttk.Spinbox(stx, from_=0.3, to=6.0, increment=0.1, width=4,
+                             textvariable=_v, command=self._redraw)
+            sp.pack(side="left")
+            sp.bind("<Return>", lambda ev: self._redraw())
+            sp.bind("<FocusOut>", lambda ev: self._redraw())
+        ttk.Button(stx, text="Reset", width=6,
+                   command=self._reset_stretch).pack(side="left", padx=(4, 0))
+        Tooltip(stx, "Stretch the 3D box along an axis for clarity without "
+                     "respacing the data. X = spectral, Y = pressure, "
+                     "Z = absorbance. Use Y to fan out crowded ridges.")
+        # 3D outline width (independent of the 2D curve width)
+        self.wf3d_lw = tk.DoubleVar(value=1.0)
+        lwsc3, _lw3 = self._slider_row(td, "3D line width", self.wf3d_lw,
+                                       0.3, 4.0, "%.2f")
+        Tooltip(lwsc3, "Thickness of the 3D ridge outlines.")
+        # faint 2D shadow projections onto the back wall / floor
+        self.wf3d_project = tk.StringVar(value="Off")
+        prr = ttk.Frame(td); prr.pack(fill="x", pady=(2, 0))
+        ttk.Label(prr, text="Project").pack(side="left")
+        ttk.Combobox(prr, textvariable=self.wf3d_project, state="readonly",
+                     width=10, values=["Off", "Back wall", "Floor", "Both"]
+                     ).pack(side="left", padx=(3, 0))
+        self.wf3d_project.trace_add("write", lambda *a: self._redraw())
+        Tooltip(prr, "Drop a faint shadow of every trace onto the back wall "
+                     "(a 2D overlay) and/or the floor, as a depth and value cue.")
         self.wf3d_detail = tk.IntVar(value=1000)
         dts, _dt = self._slider_row(td, "3D detail (points/ridge)",
                                     self.wf3d_detail, 200, 3000, "%.0f")
@@ -2045,6 +2163,19 @@ class App:
         self._skipped_count = len(skipped) if skipped else 0
         self.last_out_dir = dest
         self.smooth_cache.clear()
+        self.notch_cache.clear()
+        # When defringe is enabled, also write the *_absorbance_notch.csv files
+        # next to the absorbance CSVs on Run (matches the Defringe help text).
+        if self._notch_on():
+            wf = max(self.notch_width.get(), 0.0) / 100.0
+            nfx = 0
+            for r in results:
+                try:
+                    defringe.write_notch_csv(r, dest, wf); nfx += 1
+                except Exception as e:
+                    self._logline("  NOTCH FAIL %s: %r" % (r["label"], e))
+            self._logline("Defringe on: wrote %d *_absorbance_notch.csv -> %s"
+                          % (nfx, dest))
         self._build_trace_checks()
         labels = [r["label"] for r in results]
         self.inspect_combo.config(values=labels)
@@ -2126,7 +2257,58 @@ class App:
         return [r for r in self.results if self.trace_vars.get(r["label"])
                 and self.trace_vars[r["label"]].get()]
 
+    def _notch_result(self, r):
+        """FFT-notch the raw Sample and Background counts independently, then
+        recompute absorbance from the defringed channels. Cached per trace;
+        cleared when the toggle/width changes or new data loads."""
+        key = r["label"]
+        if key not in self.notch_cache:
+            wf = max(self.notch_width.get(), 0.0) / 100.0
+            sc = defringe.defringe_channel(r["wl"], r["samp_c"], wf)
+            bc = defringe.defringe_channel(r["wl"], r["bg_c"], wf)
+            s, b, d = sc["clean"], bc["clean"], r["dark_c"]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                A = -np.log10((s - d) / (b - d))   # == engine.process_group
+            A[~np.isfinite(A)] = np.nan
+            self.notch_cache[key] = {
+                "absorbance": A, "sample": s, "background": b,
+                "s_applied": sc["applied"], "s_pvalue": sc["pvalue"],
+                "s_nt": sc["nt_um"], "b_applied": bc["applied"],
+                "b_pvalue": bc["pvalue"], "b_nt": bc["nt_um"]}
+        return self.notch_cache[key]
+
+    def _defringe_report(self):
+        """Log a per-pressure fringe-detection summary at the current width."""
+        if not self.results:
+            messagebox.showinfo("Defringe", "No data loaded. Run first."); return
+        self._logline("Defringe report (notch width %.0f%%):"
+                      % self.notch_width.get())
+        nf = 0
+        for r in sorted(self.results, key=lambda rr: rr["pressure_val"]):
+            nr = self._notch_result(r)
+            tags = []
+            if nr["s_applied"]:
+                tags.append("S n*t=%.1fum p=%.0e" % (nr["s_nt"], nr["s_pvalue"]))
+            if nr["b_applied"]:
+                tags.append("B n*t=%.1fum p=%.0e" % (nr["b_nt"], nr["b_pvalue"]))
+            if tags:
+                nf += 1
+            self._logline("  %-24s %s" % (r["label"], ", ".join(tags) or "no fringe"))
+        self._logline("Fringe detected in %d / %d pressure(s)."
+                      % (nf, len(self.results)))
+
+    def _notch_on(self):
+        return bool(getattr(self, "show_notch", None)) and self.show_notch.get()
+
+    def _abs(self, r):
+        """Absorbance for display: defringed when the notch toggle is on."""
+        return self._notch_result(r)["absorbance"] if self._notch_on() \
+            else r["absorbance"]
+
     def _channel(self, r, which):
+        if self._notch_on() and which in ("absorbance", "sample", "background"):
+            nr = self._notch_result(r)
+            return nr["absorbance"] if which == "absorbance" else nr[which]
         return {"absorbance": r["absorbance"], "sample": r["samp_c"],
                 "background": r["bg_c"], "dark": r["dark_c"]}[which]
 
@@ -2136,10 +2318,18 @@ class App:
         self._log_action("Smoothing reset to defaults")
         self._redraw()
 
+    def _toggle_notch(self):
+        """Defringe on/off: clear caches (smoothed source changes) and redraw."""
+        self.notch_cache.clear()
+        self.smooth_cache.clear()
+        self._log_action("Defringe (FFT notch) %s"
+                         % ("on" if self.show_notch.get() else "off"))
+        self._redraw()
+
     def _smoothed(self, r):
         if r["label"] not in self.smooth_cache:
             self.smooth_cache[r["label"]] = smoothing.smooth_curve(
-                r["wl"], r["absorbance"], self.smooth_params)
+                r["wl"], self._abs(r), self.smooth_params)
         return self.smooth_cache[r["label"]]
 
 
@@ -2865,6 +3055,9 @@ class App:
         n = len(shown)
         chan = self.ydata.get()
         use_sm = chan == "absorbance" and self.show_smooth.get()
+        lw = float(self.wf3d_lw.get())          # 3D outline width (own control)
+        color_lines = self.wf3d_color_traces.get()
+        show_lines = self.wf3d_lines.get()
 
         # gather (x, z) per ridge; keep raw alongside for the faded ghost
         ridges = []
@@ -2989,8 +3182,10 @@ class App:
                           + list(zip(x, [yv] * len(x), zc))
                           + [(x[-1], yv, zlo)]]
                 face = (col[0], col[1], col[2], float(self.wf3d_alpha.get()))
+                ec = (col[0], col[1], col[2], _ealpha) if color_lines else edgecol
+                elw = lw if show_lines else 0
                 pc = Poly3DCollection(poly3d, facecolors=[face],
-                                      edgecolors=[edgecol], linewidths=lw,
+                                      edgecolors=[ec], linewidths=elw,
                                       linestyles=[style])
                 pc.set_clip_on(False)
                 pc._ridge_y = yv
@@ -3003,22 +3198,62 @@ class App:
             zpad = (zhi - zlo) * 0.03 or 0.01
             self.ax.set_zlim(zlo - zpad, zhi + zpad)
         else:
+            if not color_lines:
+                _ecn = self.wf3d_edge_color.get()
+                if _ecn == "auto":
+                    _frgb = (0.85, 0.85, 0.85) if self.dark_mode.get() else (0, 0, 0)
+                else:
+                    from matplotlib.colors import to_rgb as _torgb
+                    try:
+                        _frgb = _torgb(_ecn)
+                    except Exception:
+                        _frgb = (0, 0, 0)
             for rank, (r, (x, z)) in enumerate(zip(shown, ridges)):
                 cr = (n - 1 - rank) if rev else rank
                 cmin, cmax = (pmax, pmin) if rev else (pmin, pmax)
                 col = colormaps.color_for(cmap_name, r["pressure_val"], cmin,
                                           cmax, cr, n)
                 ls = "--" if self._branch_of(r) == "D" else "-"
+                lcol = col if color_lines else _frgb
                 ln = self.ax.plot(x, np.full_like(x, ypos[rank]),
-                                  np.clip(z, zlo, zhi), color=col, lw=lw, ls=ls)
+                                  np.clip(z, zlo, zhi), color=lcol, lw=lw, ls=ls)
                 for _l in ln:
                     _l.set_clip_on(False)
             zpad = (zhi - zlo) * 0.03 or 0.01
             self.ax.set_zlim(zlo - zpad, zhi + zpad)
 
-        # even-spacing ticks show the real pressures
+        # faint 2D shadow projections onto the back wall and/or floor
+        proj = self.wf3d_project.get()
+        if proj != "Off" and ridges:
+            y_back = max(ypos)
+            span = (max(ypos) - min(ypos)) or 1.0
+            zrange = (zhi - zlo) or 1.0
+            for rank, (r, (x, z)) in enumerate(zip(shown, ridges)):
+                if len(x) < 2:
+                    continue
+                cr = (n - 1 - rank) if rev else rank
+                cmin, cmax = (pmax, pmin) if rev else (pmin, pmax)
+                pcol = colormaps.color_for(cmap_name, r["pressure_val"], cmin,
+                                           cmax, cr, n)
+                zc = np.clip(z, zlo, zhi)
+                if proj in ("Back wall", "Both"):
+                    bl = self.ax.plot(x, np.full_like(x, y_back), zc,
+                                      color=pcol, lw=0.8, alpha=0.25)
+                    for _l in bl:
+                        _l.set_clip_on(False)
+                if proj in ("Floor", "Both"):
+                    yfloor = ypos[rank] + (zc - zlo) / zrange * (span * 0.12)
+                    fl = self.ax.plot(x, yfloor, np.full_like(x, zlo),
+                                      color=pcol, lw=0.8, alpha=0.22)
+                    for _l in fl:
+                        _l.set_clip_on(False)
+
+        # label the pressure axis with the real GPa values
         if even:
-            self.ax.set_yticks(list(range(n)))
+            self.ax.set_yticks(list(ypos))
+            self.ax.set_yticklabels(["%.1f" % p for p in pvals])
+        elif n <= 16:
+            self.ax.set_yticks(list(pvals))
             self.ax.set_yticklabels(["%.1f" % p for p in pvals])
 
         # 3D axis-limit overrides (X=wavelength, Y=pressure) when Auto is off
@@ -3069,12 +3304,14 @@ class App:
         yaspect = 1.2
         if even:
             yaspect = 1.2 * min(max(wf_step / 0.2, 0.33), 3.0)
+        sx = float(self.wf3d_sx.get()); sy = float(self.wf3d_sy.get())
+        sz = float(self.wf3d_sz.get())
         try:
-            self.ax.set_box_aspect((1.7, yaspect, 0.6),
+            self.ax.set_box_aspect((1.7 * sx, yaspect * sy, 0.6 * sz),
                                    zoom=float(self.wf3d_zoom.get()))
         except TypeError:
             try:
-                self.ax.set_box_aspect((1.7, yaspect, 0.6))
+                self.ax.set_box_aspect((1.7 * sx, yaspect * sy, 0.6 * sz))
             except Exception:
                 pass
         except Exception:
@@ -3134,7 +3371,7 @@ class App:
         h1, l1 = self.ax.get_legend_handles_labels()
         if self.ins_A.get():
             ax2 = self.ax.twinx()
-            ax2.plot(x, r["absorbance"], color="#d62728", lw=lw, label="Absorbance")
+            ax2.plot(x, self._abs(r), color="#d62728", lw=lw, label="Absorbance")
             ax2.set_ylabel("Absorbance")
             h2, l2 = ax2.get_legend_handles_labels()
             if self.legend_on.get():
@@ -3343,6 +3580,7 @@ class App:
             "lw": self.lw,
             "wf_mode": self.wf_mode, "wf_step": self.wf_step,
             "wf_label": self.wf_label, "show_smooth": self.show_smooth,
+            "show_notch": self.show_notch, "notch_width": self.notch_width,
             "raw_opacity": self.raw_opacity, "markers": self.markers,
             "title": self.title_v, "xlabel": self.xlabel_v, "ylabel": self.ylabel_v,
             "legend_on": self.legend_on, "colorbar_on": self.colorbar_on,
@@ -3359,6 +3597,9 @@ class App:
             "ins_D": self.ins_D, "ins_A": self.ins_A,
             "wf3d_even": self.wf3d_even, "wf3d_fill": self.wf3d_fill,
             "wf3d_clean": self.wf3d_clean,
+            "wf3d_look": self.wf3d_look, "wf3d_color_traces": self.wf3d_color_traces,
+            "wf3d_lw": self.wf3d_lw, "wf3d_project": self.wf3d_project,
+            "wf3d_sx": self.wf3d_sx, "wf3d_sy": self.wf3d_sy, "wf3d_sz": self.wf3d_sz,
             "wf3d_elev": self.wf3d_elev, "wf3d_azim": self.wf3d_azim,
             "wf3d_alpha": self.wf3d_alpha, "wf3d_zoom": self.wf3d_zoom,
             "aspect_mode": self.aspect_mode, "aspect_w": self.aspect_w,
@@ -3586,7 +3827,7 @@ class App:
         use_sm = self.show_smooth.get()
         for r in sorted(shown, key=lambda rr: rr["pressure_val"]):
             wla = np.asarray(r["wl"])
-            ya = self._smoothed(r) if use_sm else r["absorbance"]
+            ya = self._smoothed(r) if use_sm else self._abs(r)
             idx = int(np.argmin(np.abs(wla - wl)))
             tv.insert("", "end", values=("%.2f" % r["pressure_val"],
                                          "%.4f" % float(ya[idx])))
@@ -3602,6 +3843,7 @@ class App:
         # data + caches
         self.results = []
         self.smooth_params = dict(smoothing.DEFAULTS); self.smooth_cache.clear()
+        self.notch_cache.clear()
         if hasattr(self, "trace_frame"):
             for w in self.trace_frame.winfo_children():
                 w.destroy()
@@ -3743,7 +3985,7 @@ class App:
             fig = Figure(figsize=(6, 4), dpi=100); a = fig.add_subplot(111)
             x = unit_x(r, unit)
             ls = "--" if self._branch_of(r) == "D" else "-"
-            y = (self._smoothed(r) if self.show_smooth.get() else r["absorbance"])
+            y = (self._smoothed(r) if self.show_smooth.get() else self._abs(r))
             a.plot(x, y, ls=ls, color="#205070")
             a.set_xlabel(unit_label(unit)); a.set_ylabel("Absorbance")
             a.set_title(r["label"])
@@ -3753,6 +3995,29 @@ class App:
             fig.tight_layout(); fig.savefig(os.path.join(folder, name),
                                             dpi=int(self.dpi.get()))
         self._logline("Batch-exported %d PNG(s) -> %s" % (len(shown), folder))
+
+    def _export_defringed(self):
+        """Write {stem}_absorbance_notch.csv for every loaded pressure into a
+        chosen folder. Always defringes at the current Notch width % (independent
+        of the display toggle)."""
+        if not self.results:
+            messagebox.showinfo("Export", "No data loaded. Run first."); return
+        folder = filedialog.askdirectory(title="Folder for defringed CSVs")
+        if not folder:
+            return
+        wf = max(self.notch_width.get(), 0.0) / 100.0
+        n = 0
+        for r in self.results:
+            try:
+                p = defringe.write_notch_csv(r, folder, wf)
+                self._logline("  NOTCH %-30s -> %s"
+                              % (r["label"], os.path.basename(p)))
+                n += 1
+            except Exception as e:
+                self._logline("  NOTCH FAIL %s: %r" % (r["label"], e))
+        self._logline("Exported %d defringed CSV(s) -> %s" % (n, folder))
+        messagebox.showinfo("Export defringed CSV",
+                            "Wrote %d defringed CSV(s) to:\n%s" % (n, folder))
 
     def _export_smoothed(self):
         import csv
