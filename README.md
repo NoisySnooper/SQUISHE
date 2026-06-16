@@ -7,6 +7,28 @@ plots the results with publication-ready 2D and 3D options.
 
 ![DAC Quick-Look tool — 3D ridge (joyplot) view](docs/screenshot.png)
 
+## What's new in v1.3
+
+- **3D ridge:**
+  - Log-Z (absorbance) scale.
+  - Reference-guide planes: the 2D vertical/horizontal markers are drawn as
+    translucent planes inside the 3D box (reusing the marker color/style/width/
+    opacity controls; honors log-Z).
+- **Plotting & styling:**
+  - Trace colors locked to the full loaded dataset, so colors stay put when you
+    toggle traces.
+  - Legend / Colorbar / Reference-guides split into their own Style sections.
+  - Optional user-typed legend title with its own font size.
+  - Limits row: Auto checkbox + "Apply limits" + "Reset axes"; quick-access
+    "Reset view" now resets both the 2D zoom/pan and the 3D camera.
+- **Theme consistency:** caret / title / quick-access backgrounds follow the
+  theme; true-black theme fixed; accent tint on by default.
+- **Defringe:** FFT-notch n·t search window and acceptance p-value are now
+  adjustable (defaults unchanged).
+- **UI:** "Export D list (CSV) by selection"; tick / grid / marker control
+  cleanup.
+- **Packaging:** `pywin32` marked Windows-only in `requirements.txt`.
+
 ## What's new in v1.2
 
 - **FFT-notch defringe** (contributed by [Matthew Diamond](https://github.com/matthewrdiamond)):

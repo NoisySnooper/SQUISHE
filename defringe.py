@@ -29,8 +29,8 @@ from scipy.special import comb
 
 # -- Constants (verbatim from defringe_dac.py) -------------------------------
 NOTCH_WIDTH_FRAC  = 0.15      # default Gaussian-notch half-width / centre freq
-FRINGE_NT_MIN_NM  = 15_000    # min n*t for FFT peak search (nm) ~ 10 um
-FRINGE_NT_MAX_NM  = 100_000   # max n*t for FFT peak search (nm) ~ 30 um
+FRINGE_NT_MIN_NM  = 15_000    # min n*t for FFT peak search (nm) ~ 15 um
+FRINGE_NT_MAX_NM  = 100_000   # max n*t for FFT peak search (nm) ~ 100 um
 FRINGE_PVALUE_MAX = 1e-4      # Fisher g-test p-value above which "no fringe"
 
 _NM_TO_UM = 1.0e-3
@@ -58,7 +58,7 @@ def fisher_g_pvalue(periodogram):
     return g, pvalue
 
 
-def detect_fringe_nt(wn_u, sig_u):
+def detect_fringe_nt(wn_u, sig_u, nt_min_nm=None, nt_max_nm=None):
     """Locate the dominant fringe frequency on a uniform-wavenumber signal.
 
     Core of `fft_initial_guess` (defringe_dac.py:653). Divisive detrend
@@ -80,8 +80,8 @@ def detect_fringe_nt(wn_u, sig_u):
     fft_amp = np.abs(fft_complex)
     freqs = np.fft.rfftfreq(len(sig_win), d=dw)
 
-    freq_min = 2.0 * FRINGE_NT_MIN_NM
-    freq_max = 2.0 * FRINGE_NT_MAX_NM
+    freq_min = 2.0 * (FRINGE_NT_MIN_NM if nt_min_nm is None else float(nt_min_nm))
+    freq_max = 2.0 * (FRINGE_NT_MAX_NM if nt_max_nm is None else float(nt_max_nm))
     valid = (freqs >= freq_min) & (freqs <= freq_max)
     if not valid.any():
         return None, 1.0
@@ -124,8 +124,12 @@ def _notch(wn_u, sig_u, wl, raw, nt_nm, width_frac):
     return raw - fringe_on_wl
 
 
-def defringe_channel(wl_nm, counts, width_frac=NOTCH_WIDTH_FRAC):
+def defringe_channel(wl_nm, counts, width_frac=NOTCH_WIDTH_FRAC,
+                     nt_min_nm=None, nt_max_nm=None, pvalue_max=None):
     """FFT-notch defringe one raw intensity channel.
+
+    nt_min_nm / nt_max_nm / pvalue_max override the module constants when
+    given (None = the defringe_dac.py defaults, identical behavior).
 
     Returns a dict: {'clean', 'applied', 'nt_um', 'pvalue'}.
       clean   : defringed counts (same shape as input; a copy of `counts` when
@@ -158,9 +162,10 @@ def defringe_channel(wl_nm, counts, width_frac=NOTCH_WIDTH_FRAC):
     wn_u = np.linspace(wn_s[0], wn_s[-1], len(wn_s))
     sig_u = np.interp(wn_u, wn_s, sig_s)
 
-    nt_nm, pvalue = detect_fringe_nt(wn_u, sig_u)
+    nt_nm, pvalue = detect_fringe_nt(wn_u, sig_u, nt_min_nm, nt_max_nm)
     result["pvalue"] = pvalue
-    if nt_nm is None or nt_nm <= 0 or pvalue > FRINGE_PVALUE_MAX:
+    pmax = FRINGE_PVALUE_MAX if pvalue_max is None else float(pvalue_max)
+    if nt_nm is None or nt_nm <= 0 or pvalue > pmax:
         return result
 
     out[finite] = _notch(wn_u, sig_u, wl_f, y_f, nt_nm, width_frac)
@@ -169,9 +174,9 @@ def defringe_channel(wl_nm, counts, width_frac=NOTCH_WIDTH_FRAC):
     return result
 
 
-def defringe_curve(wl_nm, y, width_frac=NOTCH_WIDTH_FRAC):
+def defringe_curve(wl_nm, y, width_frac=NOTCH_WIDTH_FRAC, **kw):
     """Thin wrapper returning just the defringed array (for simple call sites)."""
-    return defringe_channel(wl_nm, y, width_frac)["clean"]
+    return defringe_channel(wl_nm, y, width_frac, **kw)["clean"]
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +193,8 @@ def _result_stem(result):
     return stem
 
 
-def write_notch_csv(result, out_dir, width_frac=NOTCH_WIDTH_FRAC):
+def write_notch_csv(result, out_dir, width_frac=NOTCH_WIDTH_FRAC,
+                    nt_min_nm=None, nt_max_nm=None, pvalue_max=None):
     """Write one defringed CSV for an engine result dict.
 
     Notches the raw Sample and Background counts independently, then recomputes
@@ -211,8 +217,10 @@ def write_notch_csv(result, out_dir, width_frac=NOTCH_WIDTH_FRAC):
         abs_straight = np.log10(bg_ds / s_ds)           # = +absorbance
     abs_straight[~np.isfinite(abs_straight)] = np.nan
 
-    bg_ch = defringe_channel(wl, bg, width_frac)
-    s_ch = defringe_channel(wl, s, width_frac)
+    bg_ch = defringe_channel(wl, bg, width_frac, nt_min_nm, nt_max_nm,
+                             pvalue_max)
+    s_ch = defringe_channel(wl, s, width_frac, nt_min_nm, nt_max_nm,
+                            pvalue_max)
     has_notch = bg_ch["applied"] or s_ch["applied"]
 
     bg_for_abs = (bg_ch["clean"] - dark) if bg_ch["applied"] else bg_ds
