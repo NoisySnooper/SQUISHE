@@ -1,86 +1,49 @@
 # SQUISHE
 
-*Spectral QUick-look for In-Situ High-pressure Experiments* (formerly the Beamline DAC Data Tool, NSLS-II 22-IR-1)
+*Spectral QUick-look for In-Situ High-pressure Experiments* — reduction and
+publication-quality visualization of visible / near-IR optical-absorption
+spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
+22-IR-1; formerly the Beamline DAC Data Tool).
 
-A standalone Windows tool for the visible-light absorption workflow on
-diamond-anvil-cell (DAC) samples at NSLS-II beamline 22-IR-1. It concatenates
-the four raw grating segments of each measurement, computes absorbance, and
-plots the results with publication-ready 2D and 3D options.
-
-![DAC Quick-Look tool — 3D ridge (joyplot) view](docs/screenshot.png)
-
-## What's new in v1.3
-
-- **3D ridge:**
-  - Log-Z (absorbance) scale.
-  - Reference-guide planes: the 2D vertical/horizontal markers are drawn as
-    translucent planes inside the 3D box (reusing the marker color/style/width/
-    opacity controls; honors log-Z).
-- **Plotting & styling:**
-  - Trace colors locked to the full loaded dataset, so colors stay put when you
-    toggle traces.
-  - Legend / Colorbar / Reference-guides split into their own Style sections.
-  - Optional user-typed legend title with its own font size.
-  - Limits row: Auto checkbox + "Apply limits" + "Reset axes"; quick-access
-    "Reset view" now resets both the 2D zoom/pan and the 3D camera.
-- **Theme consistency:** caret / title / quick-access backgrounds follow the
-  theme; true-black theme fixed; accent tint on by default.
-- **Defringe:** FFT-notch n·t search window and acceptance p-value are now
-  adjustable (defaults unchanged).
-- **UI:** "Export D list (CSV) by selection"; tick / grid / marker control
-  cleanup.
-- **Packaging:** `pywin32` marked Windows-only in `requirements.txt`.
-
-## What's new in v1.2
-
-- **FFT-notch defringe** (contributed by [Matthew Diamond](https://github.com/matthewrdiamond)):
-  - Enable toggle and a notch-width slider.
-  - Defringed absorbance flows through every plot.
-  - Per-pressure "Defringe report" QC log (detected n·t and p-value).
-  - "Export defringed CSV".
-  - Run also writes `*_absorbance_notch.csv` when defringe is enabled.
-- **3D ridge enhancements:**
-  - Box stretch X/Y/Z (rectangular box without respacing the data).
-  - Appearance selector (Walls + traces / Walls only / Traces only).
-  - Color traces by colormap.
-  - Camera presets (Iso / Front / Side / Top).
-  - Back-wall / floor projection.
-  - Independent 3D line width.
-  - Real-GPa tick labels on the pressure axis.
-
-## What's new in v1.1
-
-- Even rank spacing now OFF by default; 3D detail default lowered to 1000 for
-  smoother rotation on laptops.
-- Offset/step "Auto" button: evenly spaces ridges across the pressure axis in
-  view (3D).
-- Inspect-one-pressure now works while 3D ridge is selected (shows the 2D
-  channel view instead of a meaningless single ridge).
-- "No raw background" toggle (zeroes raw opacity, restores on untick).
-- Grid and reference markers unified into one consistent styling layout
-  (color / pattern / width / opacity); markers gained an opacity control.
-- Per-item text sizes: title, axis labels, axis tick text, legend, and colorbar
-  each have their own size box (the single global size control was removed).
-- Colorbar customization: label text, orientation, label/tick size, thickness,
-  tick count.
-- "Legend opacity" renamed to "Legend bg opacity"; added a legend size control.
-- Cambria headers on the three panes; bordered "Quick access" strip.
-- Readout + click-to-read moved into Plot mode.
-- Run progress bar.
-- Performance: debounced redraws + a "Performance mode" toggle (off by default)
-  that decimates 3D harder and skips the raw ghost. 2D and exports are
-  unaffected.
+![SQUISHE — 19-pressure absorbance series in the paper theme](docs/screenshot.png)
 
 ## What it does
 
-- Reads raw spectrometer segment files (`vis_{DAC}_{Sample}_{Pressure}[...].001..004`).
-- Concatenates the four segments per measurement and computes
-  `A = -log10[(Sample - Dark) / (Background - Dark)]`.
-- Writes one absorbance CSV per pressure into an auto-named output subfolder.
+- Reads raw spectrometer segments, concatenates the grating segments of each
+  measurement, and computes `A = -log10[(Sample - Dark) / (Background - Dark)]`,
+  writing one absorbance CSV per pressure point.
+- **Flexible filename ingestion**: the classic
+  `vis_{DAC}_{Sample}[_{P}][_bg|_s][_C|_D][_n][.{seq}]` convention works with
+  zero setup, and any other naming scheme can be taught from a single example
+  file ("Name format" editor: label the pieces of a real filename, watch the
+  whole folder validate live, fix or exclude stubborn files by hand, save the
+  grammar as a reusable profile).
+- **Removes diamond-anvil interference fringes** (FFT-notch defringe with a
+  Fisher g-test acceptance gate) and applies the lab's 5-step
+  Savitzky-Golay smoothing pipeline.
 - Interactive plotting: overlay, inspect-one-pressure, 2D stacked waterfall,
-  and a filled 3D ridge (joyplot) view.
-- Crameri perceptually-uniform colormaps, smoothing, journal styling,
-  per-axis tick control, light/dark mode, and named presets.
+  and a filled 3D ridge view with camera presets, keyboard orbit, box-frame
+  options, and per-axis stretch.
+
+## Highlights (v1.4)
+
+- **Multi-tab sessions**: browser-style tabs, each with independent data,
+  folders, settings, and undo history — compare loads side by side.
+- **Raw data table**: a resizable spreadsheet under the plot (wavelength,
+  wavenumber, absorbance, raw channels, defringed and smoothed columns) with
+  copy-as-TSV and open-in-Excel.
+- **Journal figure presets**: one pick applies a publisher's current column
+  width and house style (Nature, Science, RSI/AIP, APS, Elsevier) with a
+  WYSIWYG preview at the exact export size. PNG / PDF / SVG / EPS / TIFF.
+- **Publication controls**: color-block legend keys or an automatic pressure
+  colorbar for dense series, title and axis-label positioning, per-axis label
+  gaps and spine widths, Crameri perceptually-uniform colormaps.
+- **Traceability**: every reduction and export writes a JSON provenance
+  sidecar (tool version, parameters, timestamps, file hashes).
+- **A designed interface**: the SQUISHE visual system — bundled Jost
+  typeface (OFL), per-theme accent triads across every control, geometric
+  icon set, themed title bar, eight themes including true-black and paper,
+  and an adjustable interface text size.
 
 ## Run from source
 
@@ -89,7 +52,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Or double-click `run.bat`.
+Or double-click `run.bat`. Windows 10/11; the bundled Jost typeface loads
+privately at startup (no font installation).
 
 ## Build a standalone .exe (no Python needed on the target PC)
 
@@ -101,31 +65,43 @@ pyinstaller beamline_tool.spec
 ```
 
 The result is a self-contained folder at `dist\DAC_QuickLook\`. Ship the whole
-folder; the program is `DAC_QuickLook.exe` inside it. A onedir build (rather
-than a single packed .exe) is used deliberately: it starts faster and is far
-less likely to be flagged by antivirus / SmartScreen.
-
-If Windows SmartScreen warns on first launch (expected for any unsigned exe):
-More info -> Run anyway. To remove the warning entirely, sign the exe with a
-code-signing certificate.
+folder. A onedir build (rather than a single packed .exe) is used
+deliberately: it starts faster and is far less likely to be flagged by
+antivirus / SmartScreen. If SmartScreen warns on first launch (expected for
+any unsigned exe): More info -> Run anyway.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `app.py` | GUI, plotting, all controls |
-| `engine.py` | parse / concatenate / absorbance / CSV output |
+| `engine.py` | parse / concatenate / absorbance / naming profiles / CSV + provenance |
 | `defringe.py` | FFT-notch defringe (interference-fringe removal) |
 | `smoothing.py` | 5-step smoothing pipeline |
 | `colormaps.py` | Crameri + matplotlib colormaps |
 | `decomp.py` | known decompression-pressure sets |
+| `fonts/` | Jost typeface (OFL license included) |
+| `tests/` | pytest suite (parser, engine, sessions, plotting) |
 | `beamline_tool.spec`, `version_info.txt` | PyInstaller build config |
-| `requirements.txt` | dependencies |
+| `DESIGN_SQUISHE.md` | the visual design system |
+
+## Version history
+
+- **v1.4** — SQUISHE rebrand and visual system; multi-tab sessions; flexible
+  filename ingestion; raw data table; journal presets with WYSIWYG preview;
+  provenance sidecars; 2D/3D view controls; 43-test suite.
+- **v1.3** — reference-guide planes, log-Z ridge, locked trace colors,
+  legend/colorbar styling split, adjustable defringe gates.
+- **v1.2** — FFT-notch defringe (contributed by
+  [Matthew Diamond](https://github.com/matthewrdiamond)); 3D ridge stretch,
+  camera presets, projections.
+- **v1.1** — per-item text sizes, colorbar customization, performance mode.
 
 ## Credits
 
 - FFT-notch defringe (`defringe.py`) contributed by
   [Matthew Diamond](https://github.com/matthewrdiamond).
+- Developed in Dr. Kanani K. M. Lee's lab for NSLS-II beamline 22-IR-1.
 
 ## License
 
