@@ -1,4 +1,6 @@
-# Beamline DAC Data Tool (NSLS-II 22-IR-1)
+# SQUISHE
+
+*Spectral QUick-look for In-Situ High-pressure Experiments* (formerly the Beamline DAC Data Tool, NSLS-II 22-IR-1)
 
 A standalone Windows tool for the visible-light absorption workflow on
 diamond-anvil-cell (DAC) samples at NSLS-II beamline 22-IR-1. It concatenates

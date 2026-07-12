@@ -13,7 +13,9 @@ NQT / Lee Lab -- Jun 2026
 """
 
 import numpy as np
-import matplotlib.cm as mpl_cm
+# matplotlib.cm.get_cmap is deprecated (removal in 3.11); the registry
+# lookup below is the supported replacement and works on >= 3.5
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.colors import to_rgba
 
 FALLBACKS = {}
@@ -22,10 +24,8 @@ try:
     from cmcrameri import cm as _cmc
     _CRAMERI = {"batlow": _cmc.batlow, "roma": _cmc.roma,
                 "hawaii": _cmc.hawaii, "lajolla": _cmc.lajolla}
-    HAVE_CRAMERI = True
 except Exception:
     _CRAMERI = {}
-    HAVE_CRAMERI = False
     FALLBACKS = {"batlow": "viridis", "roma": "turbo",
                  "hawaii": "plasma", "lajolla": "inferno"}
 
@@ -69,27 +69,23 @@ def _continuous_cmap(name):
     if name in _CRAMERI:
         return _CRAMERI[name]
     if name in FALLBACKS:
-        return mpl_cm.get_cmap(FALLBACKS[name])
-    return mpl_cm.get_cmap(name)
+        return mpl_colormaps[FALLBACKS[name]]
+    return mpl_colormaps[name]
 
 
 def _categorical_colors(name, n):
-    if name == "okabeito":
-        return _OKABE_ITO
-    if name == "tolbright":
-        return _TOL_BRIGHT
-    if name == "tolmuted":
-        return _TOL_MUTED
-    if name == "tab10":
-        return [mpl_cm.get_cmap("tab10")(i % 10) for i in range(max(n, 1))]
+    pal = _CATEGORICAL.get(name)
+    if pal is not None:          # fixed hex palettes wired in _CATEGORICAL
+        return pal
     if name == "tab20":
-        return [mpl_cm.get_cmap("tab20")(i % 20) for i in range(max(n, 1))]
+        return [mpl_colormaps["tab20"](i % 20) for i in range(max(n, 1))]
     if name == "batlowS":  # sample batlow at n discrete levels
         cmap = _continuous_cmap("batlow")
         if n <= 1:
             return [cmap(0.5)]
         return [cmap(i / (n - 1)) for i in range(n)]
-    return [mpl_cm.get_cmap("tab10")(i % 10) for i in range(max(n, 1))]
+    # tab10, and the safety net for any unknown name
+    return [mpl_colormaps["tab10"](i % 10) for i in range(max(n, 1))]
 
 
 def color_for(name, pressure_val, pmin, pmax, rank, n_traces):

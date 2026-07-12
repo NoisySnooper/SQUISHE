@@ -4,8 +4,11 @@ decomp.py  --  known decompression (D-branch) pressure points.
 In a DAC run, pressure is ramped up (compression, C) then released
 (decompression, D). The raw filenames do not record which branch a point is on,
 so for the ten historical experiments we port the hardcoded lists from
-DAC_AutoPlot_v4.ipf (GetDecompPressures). New experiments can instead tag files
-with an optional _C / _D suffix, or be set manually in the GUI.
+DAC_AutoPlot_v4.ipf (GetDecompPressures). Only five of the ten had
+decompression points; the other five are omitted here (empty in the .ipf)
+and correctly fall through to the empty-set default. New experiments can
+instead tag files with an optional _C / _D suffix, or be set manually in
+the GUI.
 
 Keyed by "{DAC}_{Sample}" (matches engine's dac/sample tokens). Values are sets
 of pressure strings exactly as they appear in filenames (e.g. "21p1").

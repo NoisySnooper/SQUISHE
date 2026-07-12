@@ -1,7 +1,8 @@
 """
 smoothing.py  --  faithful Python port of the DAC_AutoPlot_v4 Igor smoothing.
 
-Five-step pipeline, applied in this order (each independently toggleable):
+Five-step pipeline, applied in this order (steps 1, 2, 3 and 5 are
+independently toggleable; the split Savitzky-Golay always runs):
   1. Saturation cutoff   : NaN any absorbance above a ceiling (detector saturated)
   2. Density filter       : NaN points in sparse neighbourhoods (isolated junk)
   3. Hampel despike       : replace outliers with the local median (MAD test)
@@ -38,7 +39,8 @@ def _cutoff(y, limit):
 
 
 def _density(y, win, min_pts):
-    """NaN points with fewer than min_pts finite neighbours in a +/- win/2 window."""
+    """NaN points with fewer than min_pts finite values (self included) in a
+    centred window of 2*(win//2)+1 points."""
     finite = np.isfinite(y).astype(float)
     half = int(win // 2)
     kernel = np.ones(2 * half + 1)
@@ -98,6 +100,8 @@ def _sg_chunks(y, x_nm, split, lwin, lpoly, rwin, rpoly):
 
 def _jump(y, thresh, step, buff):
     """NaN a +/- buff window around any |y[i] - y[i+step]| > thresh."""
+    if step < 1:
+        return          # zero/negative step: nothing to compare
     n = len(y)
     kill = np.zeros(n, bool)
     for i in range(n - step):

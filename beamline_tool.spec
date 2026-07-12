@@ -11,6 +11,16 @@ for pkg in ("matplotlib", "cmcrameri", "scipy", "numpy", "PIL", "sv_ttk"):
     binaries += b
     hiddenimports += h
 hiddenimports += ["win32clipboard", "win32con", "pywintypes"]
+# ship the app icon so the runtime title-bar/taskbar icon loads (app.py
+# reads icon.png from sys._MEIPASS when frozen)
+datas += [("icon.png", ".")]
+# brand typeface (SQUISHE / DESIGN_SQUISHE.md): Jost statics + license,
+# loaded privately at startup from <app dir>/fonts
+datas += [("fonts/Jost-Regular.ttf", "fonts"),
+          ("fonts/Jost-Medium.ttf", "fonts"),
+          ("fonts/Jost-SemiBold.ttf", "fonts"),
+          ("fonts/Jost-Bold.ttf", "fonts"),
+          ("fonts/OFL.txt", "fonts")]
 
 a = Analysis(
     ["app.py"],
@@ -37,6 +47,7 @@ exe = EXE(
     upx=False,
     console=False,            # windowed app, no console box
     version="version_info.txt",
+    icon="icon.ico",          # exe / taskbar icon
     disable_windowed_traceback=False,
 )
 coll = COLLECT(

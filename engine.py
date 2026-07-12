@@ -27,9 +27,31 @@ NQT / Lee Lab -- Jun 2026
 
 import os
 import csv
+import json
+import hashlib
 import numpy as np
 
 VALID_MEAS = ("dark", "background", "sample")
+
+
+# ---------------------------------------------------------------------------
+# Provenance sidecars (pure stdlib; the GUI supplies version/params/timestamp)
+# ---------------------------------------------------------------------------
+def file_sha1(path, _chunk=1 << 16):
+    """SHA-1 of a file's bytes (for recording what an export actually wrote)."""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(_chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def write_provenance(sidecar_path, payload):
+    """Write a provenance dict to sidecar_path as pretty JSON; returns the
+    path. Non-serializable values fall back to str()."""
+    with open(sidecar_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=1, default=str)
+    return sidecar_path
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +141,221 @@ def parse_segment_filename(fname):
 
 
 # ---------------------------------------------------------------------------
+# Naming profiles: user-defined filename grammars
+# ---------------------------------------------------------------------------
+# A profile is a JSON-able dict describing how a filename maps to the
+# semantic fields the pipeline needs (who/where the measurement is, which
+# channel it is, its pressure, and the grating-segment index). The classic
+# 22-IR-1 grammar stays as the hand-written parser above and is selected by
+# the sentinel BUILTIN_PROFILE (or profile=None), so its behavior can never
+# drift. Custom profiles run through parse_with_profile below.
+
+BUILTIN_PROFILE = {"builtin": True, "name": "22-IR-1 default"}
+
+FIELD_CHOICES = ("dac", "sample", "pressure", "role", "branch", "rep",
+                 "ignore")
+
+
+def default_profile(name="custom"):
+    """A fresh, editable profile template equivalent to the builtin grammar.
+    The dialog starts from this when the user makes a new profile."""
+    return {
+        "name": name,
+        "prefix": "vis",             # required first token ("" = none)
+        "sep": "_",
+        "order": ["dac", "sample", "pressure", "role", "branch", "rep"],
+        "pressure_decimal": "p",     # '12p5' -> 12.5; also accepts '.'/','
+        "pressure_unit_strip": ["gpa"],
+        "role_map": {"bg": "background", "s": "sample", "": "dark"},
+        "branch_tokens": {"c": "C", "d": "D"},
+        "seq_sep": ".",              # '<base>.003' -> segment 3
+        "seq_missing": 1,
+        "defaults": {"pressure": 0.0, "role": "dark", "rep": 1},
+    }
+
+
+def validate_profile(profile):
+    """Return a list of human-readable problems ([] = usable)."""
+    probs = []
+    if profile.get("builtin"):
+        return probs
+    if not profile.get("sep"):
+        probs.append("separator is empty")
+    order = profile.get("order") or []
+    for f in order:
+        if f not in FIELD_CHOICES:
+            probs.append("unknown field '%s' in order" % f)
+    for req in ("dac", "sample"):
+        if req not in order:
+            probs.append("'%s' missing from token order" % req)
+    for k, v in (profile.get("role_map") or {}).items():
+        if v not in VALID_MEAS:
+            probs.append("role '%s' maps to unknown channel '%s'" % (k, v))
+    if "role" in order and not (profile.get("role_map") or {}):
+        probs.append("role is in the order but the role map is empty")
+    return probs
+
+
+def _parse_pressure_token(tok, dec, strip_units):
+    """Try to read tok as a pressure. Returns (canonical_str, value) or
+    (None, None). Accepts the profile decimal char plus '.' and ','."""
+    t = tok.strip().lower()
+    for u in (strip_units or []):
+        u = (u or "").lower()
+        if u and t.endswith(u):
+            t = t[: -len(u)]
+            break
+    if not t:
+        return None, None
+    if dec and dec != ".":
+        t = t.replace(dec, ".")
+    t = t.replace(",", ".")
+    try:
+        v = float(t)
+    except ValueError:
+        return None, None
+    if v < 0:
+        return None, None
+    return ("%g" % v).replace(".", "p"), v
+
+
+def parse_with_profile(fname, profile=None):
+    """Parse one filename with a naming profile. profile=None or the
+    BUILTIN_PROFILE sentinel uses the classic hand-written 22-IR-1 parser;
+    anything else runs the generic tokenizer. Returns the same record shape
+    as parse_segment_filename."""
+    if not profile or profile.get("builtin"):
+        return parse_segment_filename(fname)
+
+    raw = fname
+    name = fname
+    if name.lower().endswith(".csv"):
+        name = name[:-4]
+
+    # A trailing <seq_sep><digits> is the grating-segment index; anything
+    # else after the separator is NOT treated as a segment (permissive:
+    # dotted pressures like '1.5' must survive when seq_sep is '.').
+    # Known ambiguity: if the pressure decimal char equals seq_sep and the
+    # name has no real segment suffix ('...-2.5'), the '5' reads as a
+    # segment. The dialog's live preview makes this visible; pick a
+    # different decimal or segment separator in that case.
+    seq_sep = profile.get("seq_sep", ".")
+    seq = int(profile.get("seq_missing", 1) or 1)
+    if seq_sep and seq_sep in name:
+        base, seq_str = name.rsplit(seq_sep, 1)
+        if seq_str.isdigit():
+            seq, name = int(seq_str), base
+
+    sep = profile.get("sep", "_") or "_"
+    tokens = [t for t in name.split(sep) if t != ""]
+
+    prefix = (profile.get("prefix") or "").strip()
+    if prefix:
+        if not tokens or tokens[0].lower() != prefix.lower():
+            return {"skip": True,
+                    "reason": "missing prefix '%s'" % prefix, "raw": raw}
+        tokens = tokens[1:]
+
+    order = list(profile.get("order") or [])
+    role_map = {str(k).lower(): v
+                for k, v in (profile.get("role_map") or {}).items()}
+    branch_tokens = {str(k).lower(): v for k, v in
+                     (profile.get("branch_tokens") or
+                      {"c": "C", "d": "D"}).items()}
+    dec = profile.get("pressure_decimal", "p")
+    strip_units = profile.get("pressure_unit_strip", ["gpa"])
+    defaults = profile.get("defaults") or {}
+
+    p_default = defaults.get("pressure", 0.0)
+    rec = {"dac": "", "sample": "",
+           "pressure_str": ("%g" % p_default).replace(".", "p"),
+           "pressure_val": float(p_default),
+           "meas": role_map.get("", defaults.get("role", "dark")),
+           "rep": int(defaults.get("rep", 1)), "branch": None,
+           "seq": seq, "pdefault": True, "raw": raw}
+
+    i = 0
+    for field in order:
+        tok = tokens[i] if i < len(tokens) else None
+        if field == "dac" or field == "sample":
+            if tok is None:
+                return {"skip": True,
+                        "reason": "missing %s token" % field, "raw": raw}
+            rec[field] = tok
+            i += 1
+        elif field == "ignore":
+            if tok is not None:
+                i += 1
+        elif field == "pressure":
+            if tok is not None:
+                ps, pv = _parse_pressure_token(tok, dec, strip_units)
+                if ps is not None:
+                    rec["pressure_str"], rec["pressure_val"] = ps, pv
+                    rec["pdefault"] = False
+                    i += 1
+        elif field == "role":
+            if tok is not None and tok.lower() in role_map:
+                rec["meas"] = role_map[tok.lower()]
+                i += 1
+        elif field == "branch":
+            if tok is not None and tok.lower() in branch_tokens:
+                rec["branch"] = branch_tokens[tok.lower()]
+                i += 1
+        elif field == "rep":
+            if tok is not None and tok.isdigit():
+                rec["rep"] = int(tok)
+                i += 1
+    if i < len(tokens):
+        return {"skip": True, "reason": "unrecognized trailing token '%s'"
+                % sep.join(tokens[i:]), "raw": raw}
+    if rec["meas"] not in VALID_MEAS:
+        return {"skip": True, "reason": "role '%s' is not a valid channel"
+                % rec["meas"], "raw": raw}
+    return rec
+
+
+def apply_override(rec, ov):
+    """Apply a per-file user override (from the Fix-files grid) to a parsed
+    record. ov keys: dac, sample, pressure (str or number), meas, branch,
+    rep, seq, skip. A skipped record is resurrected when the override
+    supplies at least a channel role (meas)."""
+    if not ov:
+        return rec
+    if ov.get("skip"):
+        return {"skip": True, "reason": "excluded by user",
+                "raw": rec.get("raw")}
+    if rec.get("skip") and not ov.get("meas"):
+        return rec                      # not enough info to resurrect
+    base = {"dac": "", "sample": "", "pressure_str": "0",
+            "pressure_val": 0.0, "meas": "dark", "rep": 1, "branch": None,
+            "seq": 1, "pdefault": False, "raw": rec.get("raw")}
+    if not rec.get("skip"):
+        base.update(rec)
+    if "pressure" in ov and ov["pressure"] not in (None, ""):
+        try:
+            v = float(str(ov["pressure"]).lower().replace("p", "."))
+        except ValueError:
+            v = None
+        if v is not None and v >= 0:
+            base["pressure_val"] = v
+            base["pressure_str"] = ("%g" % v).replace(".", "p")
+            base["pdefault"] = False
+    for k in ("dac", "sample", "meas", "branch"):
+        if ov.get(k) not in (None, ""):
+            base[k] = ov[k]
+    for k in ("rep", "seq"):
+        if ov.get(k) not in (None, ""):
+            try:
+                base[k] = int(ov[k])
+            except (TypeError, ValueError):
+                pass
+    if base["meas"] not in VALID_MEAS:
+        return {"skip": True, "reason": "override role '%s' invalid"
+                % base["meas"], "raw": rec.get("raw")}
+    return base
+
+
+# ---------------------------------------------------------------------------
 # Spectrum file reader
 # ---------------------------------------------------------------------------
 def read_spectrum(path):
@@ -147,9 +384,14 @@ def read_spectrum(path):
 # ---------------------------------------------------------------------------
 # Folder scan -> grouped segments
 # ---------------------------------------------------------------------------
-def scan_folder(in_dir):
+def scan_folder(in_dir, profile=None, overrides=None):
     """
     Walk in_dir, parse every file, and group segments by measurement.
+
+    profile: naming profile dict (None / BUILTIN_PROFILE = classic grammar).
+    overrides: {filename: field-patch} from the Fix-files grid, applied
+    after parsing (see apply_override); keys match the listed name or the
+    name without its trailing .csv twin extension.
 
     Returns (groups, skipped) where:
       groups[(dac, sample, pressure_str)] = {
@@ -162,12 +404,18 @@ def scan_folder(in_dir):
     groups = {}
     skipped = []
     seen = set()  # canonical keys to drop raw/.csv duplicates
+    overrides = overrides or {}
 
     for fname in sorted(os.listdir(in_dir)):
         full = os.path.join(in_dir, fname)
         if not os.path.isfile(full):
             continue
-        info = parse_segment_filename(fname)
+        info = parse_with_profile(fname, profile)
+        ov = overrides.get(fname)
+        if ov is None and fname.lower().endswith(".csv"):
+            ov = overrides.get(fname[:-4])
+        if ov is not None:
+            info = apply_override(info, ov)
         if info.get("skip"):
             # Only log a skip once per logical name (avoid raw + .csv double log)
             canon = fname[:-4] if fname.lower().endswith(".csv") else fname
@@ -184,7 +432,7 @@ def scan_folder(in_dir):
 
         gkey = (info["dac"], info["sample"], info["pressure_str"], info["branch"])
         g = groups.setdefault(gkey, {"pressure_val": info["pressure_val"],
-                                     "branch_tag": info["branch"], "meas": {}})
+                                     "meas": {}})
         if info.get("pdefault"):
             g["pdefault"] = True
         m = g["meas"].setdefault(info["meas"], {})
@@ -263,7 +511,12 @@ def process_group(gkey, group, warn=None):
                 wl = w
             chans[m] = c
 
-        n = min([len(wl)] + [len(c) for c in chans.values()])
+        lens = {len(wl)} | {len(c) for c in chans.values()}
+        if len(lens) > 1 and warn:
+            warn("%s_%s_%s rep%d: channel lengths differ %s -- check for a "
+                 "truncated segment file (points may misalign)"
+                 % (dac, sample, pstr, arep, sorted(lens)))
+        n = min(lens)
         wl = wl[:n]
         for m in chans:
             chans[m] = chans[m][:n]
@@ -312,7 +565,10 @@ def process_group(gkey, group, warn=None):
 # CSV writer + top-level driver
 # ---------------------------------------------------------------------------
 def write_absorbance_csv(result, out_dir):
-    """Write one result dict to {DAC}_{SAMPLE}_{PRESSURE}[_rN]_absorbance.csv."""
+    """Write one result dict to {DAC}_{SAMPLE}_{PRESSURE}[_C|_D]_absorbance.csv.
+
+    Only the latest retake of a group reaches this writer (process_group),
+    so the filename needs no replicate suffix."""
     dac, sample, pstr = result["dac"], result["sample"], result["pressure_str"]
     stem = "%s_%s_%s" % (dac, sample, pstr)
     if result.get("branch_tag"):
@@ -405,15 +661,19 @@ def load_processed_folder(in_dir, log=None):
     return results
 
 
-def run(in_dir, out_dir, log=print, should_cancel=None):
+def run(in_dir, out_dir, log=print, should_cancel=None, profile=None,
+        overrides=None):
     """
     Full Stage-1 pass over a folder.
 
+    profile/overrides: naming profile + per-file fixes (see scan_folder).
     Returns (results, skipped). Writes one CSV per result into out_dir and
     streams progress through log(callback).
     """
     os.makedirs(out_dir, exist_ok=True)
-    groups, skipped = scan_folder(in_dir)
+    if profile and not profile.get("builtin"):
+        log("Naming profile: %s" % profile.get("name", "custom"))
+    groups, skipped = scan_folder(in_dir, profile, overrides)
     log("Found %d measurement group(s); %d file(s) skipped."
         % (len(groups), len(skipped)))
     for sk in skipped:

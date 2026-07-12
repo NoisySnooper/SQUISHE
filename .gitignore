@@ -18,3 +18,12 @@ __pycache__/
 # dev scratch
 _*.py
 _test_out/
+
+# pytest
+.pytest_cache/
+
+# shippable signed-runtime package (rebuilt on demand)
+dist_signed/
+
+# dev working copy
+app_dev.py

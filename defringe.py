@@ -47,7 +47,8 @@ def fisher_g_pvalue(periodogram):
     if n < 2 or P.sum() <= 0:
         return 1.0, 1.0
     g = float(P.max() / P.sum())
-    if g <= 0:
+    if not np.isfinite(g) or g <= 0:
+        # an all-zero / all-NaN periodogram has no periodicity to test
         return g, 1.0
     p_terms = int(1.0 / g)            # floor(1/g)
     pvalue = 0.0
