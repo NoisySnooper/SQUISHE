@@ -33,8 +33,7 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   wavenumber, absorbance, raw channels, defringed and smoothed columns) with
   copy-as-TSV and open-in-Excel.
 - **Journal figure presets**: one pick applies a publisher's current column
-  width and house style (Nature, Science, RSI/AIP, APS, Elsevier) with a
-  WYSIWYG preview at the exact export size. PNG / PDF / SVG / EPS / TIFF.
+  width and house style with a WYSIWYG preview at the exact export size. 
 - **Publication controls**: color-block legend keys or an automatic pressure
   colorbar for dense series, title and axis-label positioning, per-axis label
   gaps and spine widths, Crameri perceptually-uniform colormaps.
