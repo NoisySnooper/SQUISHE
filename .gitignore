@@ -27,3 +27,10 @@ dist_signed/
 
 # dev working copy
 app_dev.py
+
+# internal working docs - never publish
+PLAN_*.md
+AUDIT_*.md
+DESIGN_*.md
+RELEASE_NOTES_*
+thickness_proto.py

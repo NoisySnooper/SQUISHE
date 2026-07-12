@@ -82,7 +82,6 @@ any unsigned exe): More info -> Run anyway.
 | `fonts/` | Jost typeface (OFL license included) |
 | `tests/` | pytest suite (parser, engine, sessions, plotting) |
 | `beamline_tool.spec`, `version_info.txt` | PyInstaller build config |
-| `DESIGN_SQUISHE.md` | the visual design system |
 
 ## Version history
 
