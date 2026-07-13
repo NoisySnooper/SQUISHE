@@ -6,7 +6,7 @@ Pick an input folder of raw segments -> Run -> per-pressure absorbance CSVs
 (written to an auto-named subfolder inside your output folder) + an interactive
 overlay/waterfall plot. Stage 1 only: no defringe/notch/thickness.
 
-Module map (so this file is easy to navigate and edit):
+Module map:
   - helpers          : unit conversions, INFO_TEXT, small utilities
   - class App
       __init__/settings ............ window setup, remembered folders
@@ -64,7 +64,7 @@ FONTS = ["Jost", "Segoe UI", "DejaVu Sans", "DejaVu Serif",
 LEGEND_LOCS = ["best", "upper right", "upper left", "lower left",
                "lower right", "center right", "outside right"]
 
-APP_VERSION = "v1.4.2"
+APP_VERSION = "v1.4.3"
 APP_CODENAME = "Olivine"
 
 # ---------------------------------------------------------------------------
@@ -186,6 +186,23 @@ QUICK_START = (
 
 PANEL_GUIDE = (
     "PANEL GUIDE\n\n"
+    "NEW IN v1.4.3\n"
+    "  Rescan (left panel) re-runs only if the input folder gained files\n"
+    "    since the last Run: the between-measurements top-up.\n"
+    "  Guess format (Name format dialog) reads the folder and proposes\n"
+    "    the grammar; check the preview, then Use this profile.\n"
+    "  A colored dot in Traces marks points the quick quality checks\n"
+    "    flagged (saturation, missing channels...); hover it for why.\n"
+    "  Click a curve to select it; double-click = solo. Click a legend\n"
+    "    entry to hide/show that trace. 'Defringe compare' (2D plot\n"
+    "    options) draws the selected trace's pre-defringe curve behind\n"
+    "    it in gray.\n"
+    "  Right-click a curve for quick actions: inspect, solo, hide, mark\n"
+    "    as decompression, defringe compare, data table. The right\n"
+    "    panel follows whatever the menu changed.\n"
+    "  Box & panes (3D) adds frame shade, per-edge checkboxes, pane\n"
+    "    color and opacity, and frame width. Box frame = none now\n"
+    "    really means no box at all.\n\n"
     "TABS & SESSIONS  (row above the plot)\n"
     "  Each tab is an independent session with its own data, folders,\n"
     "    settings, and undo history. '+' opens a blank tab; double-click a\n"
@@ -302,6 +319,9 @@ SHORTCUTS_TEXT = (
     "Ctrl+Y         Redo  (also Ctrl+Shift+Z)\n"
     "Ctrl+R         Reset 3D view\n"
     "Ctrl+Shift+C   Copy figure to clipboard\n"
+    "Click curve    Select it (highlight; defringe-compare target)\n"
+    "Dbl-click      Solo that curve (again = restore)\n"
+    "Click legend   Hide / show that trace\n"
     "Ctrl+T         New tab (blank session)\n"
     "Ctrl+W         Close the current tab\n"
     "Ctrl+Tab       Next tab  (Ctrl+Shift+Tab = previous)\n"
@@ -362,7 +382,7 @@ class Tooltip:
         self.tip.configure(bg="#555555")    # 1px frame around the tip
         tk.Label(self.tip, text=self.text, justify="left", wraplength=300,
                  background="#2b2b2b", foreground="#f0f0f0", relief="flat",
-                 font=(UI_FONT, 10), padx=8, pady=5).pack(padx=1, pady=1)
+                 font="TkTooltipFont", padx=8, pady=5).pack(padx=1, pady=1)
         # clamp to the screen so tips near the right/bottom edge stay whole
         self.tip.update_idletasks()
         tw, th = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
@@ -503,6 +523,117 @@ def _conv(frm, to):
     return fwd, inv
 
 
+class BrandCard(tk.Canvas):
+    """Flat card: panel-colored ground with a thin rounded border whose top
+    edge opens around an optional title (classic labelframe look, drawn).
+    Content goes in .body. grow='x' sizes the card to its content; grow=
+    'both' lets the interior fill whatever the card is given."""
+
+    def __init__(self, master, grow="x", pad=8, radius=9, **kw):
+        super().__init__(master, highlightthickness=0, bd=0, **kw)
+        self.grow, self.pad, self.radius = grow, pad, radius
+        self._border = "#b9b0a0"
+        self._title = None
+        self._title_anchor = "w"
+        self._twin = None
+        self.body = ttk.Frame(self)
+        self._win = self.create_window((pad, pad), window=self.body,
+                                       anchor="nw")
+        if grow == "x":
+            self.body.bind("<Configure>", lambda e: self._refresh())
+        self.bind("<Configure>", self._layout)
+        self.bind("<Map>", lambda e: self.after_idle(self._refresh))
+
+    def set_title(self, widget, anchor="w"):
+        """Mount a title widget (child of this canvas) on the border line."""
+        self._title = widget
+        self._title_anchor = anchor
+        self._twin = self.create_window((self.pad + 10, 0), window=widget,
+                                        anchor="nw")
+        widget.bind("<Configure>", lambda e: self._refresh())
+        self.after_idle(self._refresh)
+
+    def _refresh(self):
+        self._fit_height()
+        self._layout()
+
+    def _top_inset(self):
+        if self._title is None:
+            return self.pad
+        try:
+            return self._title.winfo_reqheight() + 3
+        except tk.TclError:
+            return self.pad
+
+    def _fit_height(self, _e=None):
+        if self.grow != "x":
+            return
+        need = self._top_inset() + self.body.winfo_reqheight() + self.pad
+        try:
+            if int(self.cget("height")) != need:
+                self.configure(height=need)
+        except tk.TclError:
+            pass
+
+    def _layout(self, _e=None):
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 8 or h < 8:
+            return
+        top = self._top_inset()
+        self.coords(self._win, self.pad, top)
+        self.itemconfigure(self._win, width=w - 2 * self.pad)
+        if self.grow == "both":
+            self.itemconfigure(self._win, height=max(8, h - top - self.pad))
+        self._draw_border(w, h)
+
+    def _draw_border(self, w, h):
+        self.delete("card")
+        r, c = self.radius, self._border
+        x0, x1, y1 = 1, w - 2, h - 2
+        ty = 1
+        gap = None
+        if self._title is not None:
+            try:
+                th = self._title.winfo_reqheight()
+                tw = self._title.winfo_reqwidth()
+            except tk.TclError:
+                th = tw = 0
+            ty = max(1, th // 2)
+            if self._title_anchor == "center":
+                tx = max(self.pad + 6, (w - tw) // 2)
+            else:
+                tx = self.pad + 10
+            self.coords(self._twin, tx, 0)
+            gap = (tx - 5, tx + tw + 5)
+        for box, start in (((x0, ty, x0 + 2 * r, ty + 2 * r), 90),
+                           ((x1 - 2 * r, ty, x1, ty + 2 * r), 0),
+                           ((x1 - 2 * r, y1 - 2 * r, x1, y1), 270),
+                           ((x0, y1 - 2 * r, x0 + 2 * r, y1), 180)):
+            self.create_arc(box, start=start, extent=90, style="arc",
+                            outline=c, width=1, tags="card")
+        if gap is None:
+            self.create_line(x0 + r, ty, x1 - r, ty, fill=c, width=1,
+                             tags="card")
+        else:
+            if gap[0] > x0 + r + 2:
+                self.create_line(x0 + r, ty, gap[0], ty, fill=c, width=1,
+                                 tags="card")
+            if gap[1] < x1 - r - 2:
+                self.create_line(gap[1], ty, x1 - r, ty, fill=c, width=1,
+                                 tags="card")
+        for ln in ((x0 + r, y1, x1 - r, y1),
+                   (x0, ty + r, x0, y1 - r), (x1, ty + r, x1, y1 - r)):
+            self.create_line(*ln, fill=c, width=1, tags="card")
+
+    def retint(self, bg, border):
+        self._border = border
+        try:
+            self.configure(background=bg)
+        except tk.TclError:
+            pass
+        self._layout()
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -539,7 +670,16 @@ class App:
         global UI_FONT, UI_FONT_SEMI
         _register_brand_fonts()
         UI_FONT, UI_FONT_SEMI = _resolve_ui_font()
-        self._body_size = int(self.settings.get("ui_font_size", 9))
+        self._scaled_fonts = {}   # (delta, weight, mono, semi, ul) -> Font
+        _ufs = self.settings.get("ui_font_size", "auto")
+        self._ui_font_auto = str(_ufs).strip().lower() in ("auto", "none", "")
+        if not self._ui_font_auto:
+            try:
+                self._body_size = max(9, min(15, int(_ufs)))
+            except (TypeError, ValueError):
+                self._ui_font_auto = True
+        if self._ui_font_auto:
+            self._body_size = self._auto_body_size()
         _bs = self._body_size
         for _nf, _sz in (("TkDefaultFont", _bs), ("TkTextFont", _bs),
                          ("TkMenuFont", _bs), ("TkHeadingFont", _bs),
@@ -911,6 +1051,9 @@ class App:
             try:
                 if img is not None:
                     lab.configure(image=img, compound="left")
+                    _t4 = lab.cget("text")
+                    if _t4 and not _t4.startswith(" "):
+                        lab.configure(text=" " + _t4)
                 keep4.append((lab, name))
             except tk.TclError:
                 pass
@@ -1030,7 +1173,8 @@ class App:
             d.line([a, b], fill=br["ac2"], width=W)
         keep("gear", im, sz)
         # anvil mark: the brand logo (two ink anvils pressing an ac2 sample)
-        for name, px in (("mark", 20), ("mark_lg", 44)):
+        for name, px in (("mark", max(20, self._body_size + 10)),
+                         ("mark_lg", 44), ("mark_xl", 96)):
             im, d, _ = new(px)
             s = px * 2
             d.polygon([(s*0.15, s*0.08), (s*0.85, s*0.08),
@@ -1105,7 +1249,7 @@ class App:
         sec("Defringe", lambda d: (
             d.arc([2, 7, 12, 17], 180, 360, fill=A, width=W),
             d.arc([12, 7, 22, 17], 0, 180, fill=A, width=W)))
-        sec("Traces  (check = show,  D = decompression)", lambda d: (
+        sec("Traces", lambda d: (
             d.line([3, 7, 8, 12], fill=A, width=W),
             d.line([8, 12, 14, 4], fill=A, width=W),
             d.line([3, 19, 21, 19], fill=A, width=W)))
@@ -1254,12 +1398,12 @@ class App:
         """Brand header for a left-panel LabelFrame: ac2 square + bold
         title, matching the right panel's section language (plan B4)."""
         f = ttk.Frame(parent)
-        m = self._lbl(f, text="\u25a0", font=(UI_FONT, 7),
+        m = self._lbl(f, text="\u25a0", font=self._F(-2),
                       foreground=self._brand()["ac2"])
         m.pack(side="left", padx=(0, 4))
         self._lf_markers = getattr(self, "_lf_markers", [])
         self._lf_markers.append(m)
-        self._lbl(f, text=text, font=(UI_FONT, 10, "bold")).pack(side="left")
+        self._lbl(f, text=text, font=self._F(1, "bold")).pack(side="left")
         return f
 
     def _iconize_buttons(self):
@@ -1303,6 +1447,10 @@ class App:
             import ctypes
             w = win or self.root
             w.update_idletasks()
+            try:
+                w.configure(background=self._theme_palette()[0])
+            except tk.TclError:
+                pass
             hwnd = ctypes.windll.user32.GetParent(w.winfo_id())
             if not hwnd:
                 return
@@ -1331,7 +1479,7 @@ class App:
                       bd=0, cursor="hand2", bg=br["ac1"], fg="#ffffff",
                       activebackground=br["hov"], activeforeground="#ffffff",
                       disabledforeground="#cfcfcf",
-                      font=(UI_FONT, 10, "bold"),
+                      font=self._F(1, "bold"),
                       padx=14, pady=2)
         if not hasattr(self, "_brand_btns"):
             self._brand_btns = []
@@ -1339,6 +1487,38 @@ class App:
         b.bind("<Enter>", lambda e: b.configure(bg=self._brand()["hov"]))
         b.bind("<Leave>", lambda e: b.configure(bg=self._brand()["ac1"]))
         return b
+
+    def _hairline(self):
+        """(ground, border) for the flat cards: border = a 32% blend of
+        the text color into the panel ground."""
+        uibg, fg, _fl, _pb, _pf = self._theme_palette()
+        try:
+            r1, g1, b1 = self.root.winfo_rgb(uibg)
+            r2, g2, b2 = self.root.winfo_rgb(fg)
+            t = 0.32
+            border = "#%02x%02x%02x" % (
+                int((r1 * (1 - t) + r2 * t) / 256),
+                int((g1 * (1 - t) + g2 * t) / 256),
+                int((b1 * (1 - t) + b2 * t) / 256))
+        except tk.TclError:
+            border = "#b9b0a0"
+        return uibg, border
+
+    def _card(self, parent, grow="x", width=None):
+        """A BrandCard registered for theme retints, tinted immediately
+        (dialog cards would otherwise show default colors)."""
+        kw = {"width": width} if width else {}
+        c = BrandCard(parent, grow=grow, **kw)
+        if not hasattr(self, "_brand_cards"):
+            self._brand_cards = []
+        self._brand_cards = [x for x in self._brand_cards
+                             if x.winfo_exists()]
+        self._brand_cards.append(c)
+        try:
+            c.retint(*self._hairline())
+        except tk.TclError:
+            pass
+        return c
 
     def _recolor_tk(self):
         """Recolor plain tk widgets (Text, Canvas) that ignore the ttk theme."""
@@ -1348,9 +1528,17 @@ class App:
               "#1c1d22" if t == "dark" else
               "white" if t == "light" else fld)
         scrolls = set(getattr(self, "_tab_canvases", []))
+        flats = {getattr(self, "log", None), getattr(self, "ref", None)}
         for w in getattr(self, "_tk_widgets", []):
             if w in scrolls:
                 continue                # settings pages match the chrome below
+            if w in flats:              # flat boxes: ground color, not field
+                try:
+                    w.configure(background=uibg, foreground=fg,
+                                insertbackground=fg)
+                except tk.TclError:
+                    pass
+                continue
             try:
                 w.configure(background=bg, foreground=fg, insertbackground=fg)
             except tk.TclError:
@@ -1367,6 +1555,12 @@ class App:
         st = getattr(self, "_last_run_state", None)
         if st:
             self._set_run_state(*st)
+        _hl = self._hairline()
+        for c in getattr(self, "_brand_cards", []):
+            try:
+                c.retint(*_hl)
+            except tk.TclError:
+                pass
         self._sync_tabs()   # tab strip follows the theme
 
     # ---- theme: modern look + light/dark ---------------------------------
@@ -1408,6 +1602,81 @@ class App:
         self._recolor_accents(th.get("accent"), th.get("rainbow", False))
         matplotlib.rcParams["pdf.fonttype"] = 42
         matplotlib.rcParams["ps.fonttype"] = 42
+
+    def _auto_body_size(self):
+        """Default interface text size from the screen: 12 on a roomy
+        desktop, down to 9 where Windows display scaling (e.g. 150% on a
+        laptop) shrinks the logical width. 1280 logical px -> 9,
+        1920 -> 12."""
+        try:
+            scale = max(0.5, self.root.winfo_fpixels("1i") / 96.0)
+            eff = self.root.winfo_screenwidth() / scale
+        except (tk.TclError, ValueError):
+            return 9
+        return int(max(9, min(12, round(9 + 3.0 * (eff - 1280.0) / 640.0))))
+
+    def _F(self, delta=0, weight="normal", mono=False, semi=False):
+        """Shared font at body size + delta. Widgets built with these are
+        reconfigured in place by _apply_style_fonts, so everything follows
+        the App-text-size control (the old literal sizes did not)."""
+        if weight == "underline":
+            weight, ul = "normal", True
+        else:
+            ul = False
+        key = (delta, weight, mono, semi, ul)
+        f = self._scaled_fonts.get(key)
+        if f is None:
+            f = tkfont.Font()
+            self._scaled_fonts[key] = f
+            self._conf_scaled(key, f)
+        return f
+
+    def _conf_scaled(self, key, f):
+        delta, weight, mono, semi, ul = key
+        bs = getattr(self, "_body_size", 9)
+        fam = "Consolas" if mono else (UI_FONT_SEMI if semi else UI_FONT)
+        f.configure(family=fam, size=max(7, bs + delta), weight=weight,
+                    underline=ul)
+
+    def _em(self):
+        """Width of one '0' in the body font: the px unit panel widths
+        scale by (tracks both text size and the Windows DPI scale)."""
+        try:
+            return max(5, self._F(0).measure("0"))
+        except tk.TclError:
+            return 7
+
+    def _pane_widths(self):
+        # 330/410 px were tuned at body size 9 on a 96-dpi screen (em = 7)
+        em = self._em()
+        return (em * 28, em * 42, em * 36, em * 53)  # lmin, lw, rmin, rw
+
+    def _size_nuke(self):
+        """Keep NUKE a notch shorter than the top bar (visible gap to the
+        brand strip) and never let it cover the Undo/Redo cluster on
+        narrow windows: it stays centered while there is room, then slides
+        left of Undo."""
+        b = getattr(self, "nuke_btn", None)
+        if b is None:
+            return
+        try:
+            h = max(24, b.winfo_reqheight() - 8)
+            top = b.master
+            tw = top.winfo_width()
+            ub = getattr(self, "undo_btn", None)
+            if tw > 1 and ub is not None and ub.master.winfo_ismapped():
+                nw = b.winfo_reqwidth()
+                lim = ub.master.winfo_x() - nw // 2 - 16
+                tf = getattr(self, "_titles_f", None)
+                lo = (tf.winfo_x() + tf.winfo_width() if tf is not None
+                      else 0) + nw // 2 + 12
+                x = min(tw // 2, max(lo, lim))
+                b.place_configure(relx=0, x=x, rely=0.5, anchor="center",
+                                  height=h)
+            else:
+                b.place_configure(height=h)
+        except tk.TclError:
+            pass
 
     def _apply_style_fonts(self):
         """sv_ttk pins fonts two ways at set_theme: named SunValley* fonts
@@ -1451,9 +1720,27 @@ class App:
         except tk.TclError:
             pass
         try:
+            st.configure("Compact.TButton",
+                         font=(UI_FONT, max(8, bs - 1)), padding=(6, 2))
             st.configure("Treeview.Heading", font=(semi, bs, "bold"))
             st.configure("TLabelframe.Label", font=(semi, bs, "bold"))
-            st.configure("NameFmt.TButton", font=(semi, bs, "bold"))
+            st.configure("NameFmt.TButton", font=(UI_FONT, bs))
+        except tk.TclError:
+            pass
+        # everything built through _F follows the body size live
+        for _k, _f in getattr(self, "_scaled_fonts", {}).items():
+            self._conf_scaled(_k, _f)
+        try:
+            _lh = self._F(0).metrics("linespace")
+            st.configure("Treeview", rowheight=max(20, _lh + 8))
+        except tk.TclError:
+            pass
+        try:  # combobox dropdown lists (new popdowns pick this up)
+            self.root.option_add("*TCombobox*Listbox.font", self._F(0))
+        except tk.TclError:
+            pass
+        try:
+            self.root.after_idle(self._size_nuke)
         except tk.TclError:
             pass
 
@@ -1500,9 +1787,9 @@ class App:
             if self.theme_mode.get() != "rainbow":
                 # brand strip: one theme color (Nhan: single, per theme)
                 ac = self._brand()["ac1"]
-                cv.configure(height=3, bg=ac)
+                cv.configure(height=6, bg=ac)
                 w = cv.winfo_width() or self.root.winfo_width() or 1200
-                cv.create_rectangle(0, 0, w, 3, fill=ac, outline=ac)
+                cv.create_rectangle(0, 0, w, 6, fill=ac, outline=ac)
                 return
             import colorsys
             cv.configure(height=6, bg="#000000")
@@ -1559,7 +1846,10 @@ class App:
                 res(getattr(self, "text_color", None)))
 
     def _mpl_colors(self):
-        _u, _f, _fl, pb, pf = self._theme_palette()
+        u, f, _fl, pb, pf = self._theme_palette()
+        if (getattr(self, "plot_theme_bg", None) is not None
+                and self.plot_theme_bg.get()):
+            return (u, f)
         return (pb, pf)
 
     # ---- action log + undo/redo ------------------------------------------
@@ -1881,14 +2171,14 @@ class App:
             row = tk.Frame(tab, bg=uibg); row.pack(side="top", fill="x")
             lbl = tk.Label(row, text=nm, bg=uibg,
                            fg=(fg if on else muted),
-                           font=(UI_FONT, 10, "bold" if on else "normal"),
+                           font=self._F(1, "bold" if on else "normal"),
                            padx=namepad, pady=3)
             lbl.pack(side="left")
             # close x: always laid out (no width jitter) but painted
             # invisible on inactive tabs until hovered
             xb = tk.Label(row, text="\u00d7", bg=uibg,
                           fg=(fg if on else uibg),
-                          font=(UI_FONT, 10), padx=3, cursor="hand2")
+                          font=self._F(1), padx=3, cursor="hand2")
             xb.pack(side="left", padx=(0, 4))
             if not on:
                 def _hov(_e, x=xb, c=muted):
@@ -1910,7 +2200,7 @@ class App:
                 Tooltip(lbl, s["name"] + "  (double-click to rename, "
                         "middle-click to close)")
         plus = tk.Label(bar, text="+", bg=uibg, fg=fg,
-                        font=(UI_FONT, 13), padx=8, cursor="hand2")
+                        font=self._F(4), padx=8, cursor="hand2")
         plus.pack(side="left", padx=(2, 0))
         plus.bind("<Button-1>", lambda e: self._new_session())
         Tooltip(plus, "New tab: a blank session for another run (Ctrl+T).")
@@ -1937,7 +2227,7 @@ class App:
         if tabf is None:
             return
         bar.update_idletasks()
-        e = tk.Entry(bar, font=(UI_FONT, 10))
+        e = tk.Entry(bar, font=self._F(1))
         e.insert(0, self.sessions[i]["name"])
         e.select_range(0, "end")
         e.place(x=tabf.winfo_x(), y=1,
@@ -2002,23 +2292,19 @@ class App:
                                  lambda e: self._draw_rainbow_banner())
         titles = ttk.Frame(top)
         titles.pack(side="left")
+        self._titles_f = titles
         # the anvil mark (drawn per theme; image attached in _apply_brand)
         self._hdr_mark_lbl = self._lbl(titles)
         self._hdr_mark_lbl.pack(side="left", anchor="s", padx=(0, 7),
                                 pady=(0, 2))
         self.title_lbl = self._lbl(titles, text=BRAND["wordmark"],
-                                   font=(UI_FONT_SEMI, 15))
+                                   font=self._F(6, semi=True))
         self.title_lbl.pack(side="left", anchor="s")
         self._wm_dot = self._lbl(titles, text=BRAND["dot"],
-                                 font=(UI_FONT_SEMI, 15, "bold"))
+                                 font=self._F(6, "bold", semi=True))
         self._wm_dot.pack(side="left", anchor="s")
-        self._lbl(titles,
-                  text="   " + BRAND["subtitle"],
-                  font=(UI_FONT, 10), foreground="#888").pack(side="left",
-                                                                anchor="s",
-                                                                pady=(0, 2))
         vchip = self._lbl(titles, text="   %s" % APP_VERSION,
-                          font=(UI_FONT, 10), foreground="#888")
+                          font=self._F(1), foreground="#888")
         vchip.pack(side="left", anchor="s", pady=(0, 2))
         vchip.configure(cursor="hand2")
         vchip.bind("<Button-1>", lambda e: self._about())
@@ -2036,7 +2322,7 @@ class App:
         ab.pack(side="right", padx=(0, 6))
         Tooltip(ab, "About, the full guide, and credits. F1 shows the "
                     "keyboard shortcuts anytime.")
-        thf = ttk.Frame(top); thf.pack(side="right", padx=10)
+        thf = ttk.Frame(top); thf.pack(side="right", padx=(4, 4))
         self._lbl(thf, text="Theme").pack(side="left", padx=(0, 4))
         thcb = ttk.Combobox(thf, textvariable=self.theme_mode, state="readonly",
                             width=9, values=["light", "dark", "black", "forest",
@@ -2047,7 +2333,7 @@ class App:
         self.tooltips_on = tk.BooleanVar(
             value=bool(self.settings.get("tooltips_on", True)))
         Tooltip.enabled = self.tooltips_on.get()
-        hlf = ttk.Frame(top); hlf.pack(side="right", padx=(0, 10))
+        hlf = ttk.Frame(top); hlf.pack(side="right", padx=(0, 2))
         self._lbl(hlf, text="Helper").pack(side="left", padx=(0, 4))
         try:
             hsw = ttk.Checkbutton(hlf, style="Switch.TCheckbutton",
@@ -2074,6 +2360,9 @@ class App:
                                   font=(UI_FONT, 13, "bold"), relief="raised",
                                   bd=2, padx=12, pady=0, cursor="hand2")
         self.nuke_btn.place(relx=0.5, rely=0.5, anchor="center")
+        self.root.after(50, self._size_nuke)
+        top.bind("<Configure>", lambda e: self._size_nuke())
+        urf.bind("<Configure>", lambda e: self._size_nuke())
         Tooltip(self.nuke_btn,
                 "Reset everything to a fresh start: clears loaded data, the plot, "
                 "the folders, the log, and all controls back to defaults. Your "
@@ -2094,9 +2383,9 @@ class App:
         self._reorder_sections()
         self.root.after(80, self._restore_tab)
 
-        self.pw.add(self.left, minsize=220, width=330, stretch="never")
+        self.pw.add(self.left, minsize=self._pane_widths()[0], width=self._pane_widths()[1], stretch="never")
         self.pw.add(self.center, minsize=400, stretch="always")
-        self.pw.add(self.right_outer, minsize=300, width=410, stretch="never")
+        self.pw.add(self.right_outer, minsize=self._pane_widths()[2], width=self._pane_widths()[3], stretch="never")
         self.left_shown = True
         self.right_shown = True
 
@@ -2104,7 +2393,7 @@ class App:
         if self.left_shown:
             self.pw.forget(self.left); self.left_btn.config(text="> Show left")
         else:
-            self.pw.add(self.left, before=self.center, minsize=220, width=330,
+            self.pw.add(self.left, before=self.center, minsize=self._pane_widths()[0], width=self._pane_widths()[1],
                         stretch="never")
             self.left_btn.config(text="< Hide left")
         self.left_shown = not self.left_shown
@@ -2114,27 +2403,35 @@ class App:
             self.pw.forget(self.right_outer)
             self.right_btn.config(text="< Show right")
         else:
-            self.pw.add(self.right_outer, minsize=300, width=410, stretch="never")
+            self.pw.add(self.right_outer, minsize=self._pane_widths()[2], width=self._pane_widths()[3], stretch="never")
             self.right_btn.config(text="Hide right >")
         self.right_shown = not self.right_shown
 
 
     # ---- left pane: folders, run, log, reference -------------------------
     def _build_left(self, p):
-        self._lbl(p, text="Data Input", font=(UI_FONT, 11, "bold")).pack(
-            anchor="w", pady=(0, 4))
+        hdr0 = ttk.Frame(p)
+        hdr0.pack(fill="x", pady=(0, 4))
+        self._lbl(hdr0, text="Data Input", font=self._F(2, "bold")).pack(
+            side="left")
+        self.run_state = self._lbl(hdr0, text="Ready", foreground="#2a8a4a",
+                                   font=self._F(1, "bold"))
+        self.run_state.pack(side="right")
+        Tooltip(self.run_state, "Reduction status: Ready, Working, or how "
+                                "many traces the last Run produced.")
 
-        inf = ttk.LabelFrame(p, labelwidget=self._lf_header(p, "Input folder (raw segments)"),
-                             padding=6)
-        inf.pack(fill="x", pady=4)
+        _cin = self._card(p)
+        _cin.pack(fill="x", pady=(2, 4))
+        _cin.set_title(self._lf_header(_cin, "Input folder (raw segments)"))
+        inf = _cin.body
         irow = ttk.Frame(inf); irow.pack(fill="x")
         self.in_var = tk.StringVar(value=self.settings.get("in_dir", ""))
         ient = ttk.Entry(irow, textvariable=self.in_var)
-        ient.pack(side="left", fill="x", expand=True)
         self._in_entry = ient
         self._browse_in_btn = ttk.Button(irow, text="Browse",
                                          command=self._browse_in)
-        self._browse_in_btn.pack(side="left")
+        self._browse_in_btn.pack(side="right")
+        ient.pack(side="left", fill="x", expand=True)
 
         # hover the box to see the full path (the entry truncates when long)
         self._in_tip = Tooltip(ient, "")
@@ -2151,17 +2448,18 @@ class App:
                 "22-IR-1 vis_... names; open this to teach a different "
                 "naming scheme or fix stubborn files one by one.")
 
-        ouf = ttk.LabelFrame(p, labelwidget=self._lf_header(p, "Output folder"),
-                             padding=6)
-        ouf.pack(fill="x", pady=4)
+        _cout = self._card(p)
+        _cout.pack(fill="x", pady=(2, 4))
+        _cout.set_title(self._lf_header(_cout, "Output folder"))
+        ouf = _cout.body
         orow = ttk.Frame(ouf); orow.pack(fill="x")
         self.out_var = tk.StringVar(value=self.settings.get("out_dir", ""))
         oent = ttk.Entry(orow, textvariable=self.out_var)
-        oent.pack(side="left", fill="x", expand=True)
         self._out_entry = oent
         self._browse_out_btn = ttk.Button(orow, text="Browse",
                                           command=self._browse_out)
-        self._browse_out_btn.pack(side="left")
+        self._browse_out_btn.pack(side="right")
+        oent.pack(side="left", fill="x", expand=True)
 
         self._out_tip = Tooltip(oent, "")
         self.out_var.trace_add("write", lambda *a: self._update_folder_tips())
@@ -2176,14 +2474,20 @@ class App:
         self._openout_btn = ttk.Button(brow, text="Open output",
                                        command=self._open_output)
         self._openout_btn.pack(side="left", padx=(6, 0))
-        self.run_state = self._lbl(brow, text="Ready", foreground="#2a8a4a",
-                                   font=(UI_FONT, 10, "bold"))
-        self.run_state.pack(side="left", padx=(8, 0))
+
 
         lrow = ttk.Frame(p); lrow.pack(fill="x", pady=(0, 6))
         self.load_prev_btn = ttk.Button(lrow, text="Load previous run\u2026",
                                         command=self._load_previous)
-        self.load_prev_btn.pack(fill="x", expand=True)
+        self._rescan_btn = ttk.Button(lrow, text="Rescan", width=8,
+                                      command=self._rescan)
+        self._rescan_btn.pack(side="right", padx=(4, 0))
+        self.load_prev_btn.pack(side="left", fill="x", expand=True)
+        Tooltip(self._rescan_btn,
+                "Check the input folder for files added since the last Run "
+                "(the between-measurements top-up). If anything new "
+                "appeared, the whole folder is re-reduced; if not, nothing "
+                "happens.")
         Tooltip(self.load_prev_btn,
                 "Reopen a finished run without re-processing: pick the "
                 "output subfolder a Run wrote and its *_absorbance.csv "
@@ -2193,9 +2497,10 @@ class App:
         self.run_prog = ttk.Progressbar(p, mode="determinate")
         self.run_prog.pack(fill="x", pady=(0, 4))
 
-        pgf = ttk.LabelFrame(p, labelwidget=self._lf_header(p, "Progress"),
-                             padding=4)
-        pgf.pack(fill="both", expand=True, pady=4)
+        _cpg = self._card(p, grow="both")
+        _cpg.pack(fill="both", expand=True, pady=(2, 4))
+        _cpg.set_title(self._lf_header(_cpg, "Progress"))
+        pgf = _cpg.body
         pgbtn = ttk.Frame(pgf); pgbtn.pack(side="bottom", fill="x")
         cl = self._copylog_btn = ttk.Button(pgbtn, text="Copy log",
                                             command=self._copy_log)
@@ -2206,7 +2511,7 @@ class App:
         es.pack(side="left", padx=(4, 0))
         Tooltip(es, "Print the current plot configuration to the log so you can "
                     "paste it into a paper's methods section.")
-        self.log = tk.Text(pgf, height=8, wrap="none", font=("Consolas", 9),
+        self.log = tk.Text(pgf, height=8, wrap="none", font=self._F(0, mono=True),
                            relief="flat")
         self._tk_widgets.append(self.log)
         sb = ttk.Scrollbar(pgf, command=self.log.yview)
@@ -2216,9 +2521,10 @@ class App:
         hb.pack(side="bottom", fill="x")
         self.log.pack(side="left", fill="both", expand=True)
 
-        gf = ttk.LabelFrame(p, labelwidget=self._lf_header(p, "Guide / notes"),
-                             padding=6)
-        gf.pack(fill="both", expand=True, pady=4)
+        _cgf = self._card(p, grow="both")
+        _cgf.pack(fill="both", expand=True, pady=(2, 4))
+        _cgf.set_title(self._lf_header(_cgf, "Guide / notes"))
+        gf = _cgf.body
         hdr = ttk.Frame(gf); hdr.pack(fill="x")
         self._lbl(hdr, text="View").pack(side="left")
         _views = list(REF_VIEWS.keys()) + ["My notes"]
@@ -2242,7 +2548,7 @@ class App:
             "write", lambda *a: self._apply_guide_font())
         gearb = ttk.Button(hdr, text="\u2699", width=3,
                            command=self._guide_font_popup)
-        gearb.pack(side="left", padx=(4, 0))
+        gearb.pack(side="right", padx=(4, 0), before=cb)
         Tooltip(gearb, "Text settings for this box (font, size).")
         rw = ttk.Frame(gf); rw.pack(fill="both", expand=True)
         self.ref = tk.Text(rw, height=16, wrap="word", relief="flat",
@@ -2285,25 +2591,64 @@ class App:
         # app-wide interface text size (the whole program, not just this box)
         self._lbl(b, text="App text size").grid(row=3, column=0, sticky="w")
         self._ui_size_var = tk.IntVar(value=self._body_size)
-        us = ttk.Spinbox(b, from_=9, to=15, width=5,
+        usf = ttk.Frame(b)
+        usf.grid(row=3, column=1, padx=(6, 0), pady=1, sticky="w")
+        us = ttk.Spinbox(usf, from_=9, to=15, width=5,
                          textvariable=self._ui_size_var,
-                         command=self._apply_ui_size)
-        us.grid(row=3, column=1, padx=(6, 0), pady=1, sticky="w")
-        us.bind("<Return>", lambda e: self._apply_ui_size())
+                         command=lambda: self._queue_ui_size(manual=True))
+        us.pack(side="left")
+        us.bind("<Return>", lambda e: self._queue_ui_size(manual=True))
+        self._ui_auto_var = tk.BooleanVar(value=self._ui_font_auto)
+        uac = ttk.Checkbutton(usf, text="auto", variable=self._ui_auto_var,
+                              command=self._ui_size_auto_toggle)
+        uac.pack(side="left", padx=(8, 0))
         Tooltip(us, "Size of every button, label and control in the program "
                     "(9-15). Applies live and is remembered.")
+        Tooltip(uac, "Pick the size from the screen and the Windows display "
+                     "scale automatically: 12 on a roomy desktop, smaller "
+                     "on scaled laptops.")
         ttk.Button(b, text="Done", command=p.destroy).grid(
             row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         p.bind("<Escape>", lambda e: p.destroy())
 
+    def _queue_ui_size(self, manual=False):
+        """Debounced apply. A spinbox arrow auto-repeats while the (slow)
+        font sweep runs, which used to land 3 steps per click; the change
+        is applied once, shortly after the clicks stop."""
+        if manual:
+            self._ui_font_auto = False
+            try:
+                self._ui_auto_var.set(False)
+            except (AttributeError, tk.TclError):
+                pass
+        h = getattr(self, "_uisz_after", None)
+        if h:
+            try:
+                self.root.after_cancel(h)
+            except (ValueError, tk.TclError):
+                pass
+        self._uisz_after = self.root.after(200, self._apply_ui_size)
+
+    def _ui_size_auto_toggle(self):
+        self._ui_font_auto = bool(self._ui_auto_var.get())
+        if self._ui_font_auto:
+            try:
+                self._ui_size_var.set(self._auto_body_size())
+            except tk.TclError:
+                pass
+        self._queue_ui_size()
+
     def _apply_ui_size(self):
-        """Change the whole interface text size live and persist it."""
+        """Change the whole interface text size live and persist it.
+        Reached through _queue_ui_size (debounced)."""
+        self._uisz_after = None
         try:
             sz = max(9, min(15, int(self._ui_size_var.get())))
         except (ValueError, tk.TclError):
             return
         self._body_size = sz
-        self.settings["ui_font_size"] = sz
+        self.settings["ui_font_size"] = ("auto" if getattr(
+            self, "_ui_font_auto", False) else sz)
         _bs = sz
         for _nf, _s in (("TkDefaultFont", _bs), ("TkTextFont", _bs),
                         ("TkMenuFont", _bs), ("TkHeadingFont", _bs),
@@ -2313,8 +2658,17 @@ class App:
             except tk.TclError:
                 pass
         self._apply_style_fonts()
+        self._apply_brand()
+        try:
+            _pl = self._pane_widths()
+            self.pw.paneconfigure(self.left, minsize=_pl[0], width=_pl[1])
+            self.pw.paneconfigure(self.right_outer, minsize=_pl[2],
+                                  width=_pl[3])
+        except (AttributeError, tk.TclError):
+            pass
         self._save_settings()
-        self._log_action("Interface text size: %d" % sz)
+        self._log_action("Interface text size: %d%s" % (
+            sz, " (auto)" if getattr(self, "_ui_font_auto", False) else ""))
 
     def _apply_guide_font(self):
         """Apply + persist the guide/notes typeface and size."""
@@ -2488,13 +2842,13 @@ class App:
         cont = ttk.Frame(parent); cont.pack(fill="x", pady=(5, 12))
         hdr = ttk.Frame(cont); hdr.pack(fill="x")
         caret = self._lbl(hdr, text="\u25bc", width=3,
-                          font=(UI_FONT, 10, "bold"))
+                          font=self._F(1, "bold"))
         caret.pack(side="left")
         # Bauhaus square marker (ac2) sits between the caret and the title
-        marker = self._lbl(hdr, text="\u25a0", font=(UI_FONT, 8),
+        marker = self._lbl(hdr, text="\u25a0", font=self._F(-1),
                            foreground=self._brand()["ac2"])
         marker.pack(side="left", padx=(0, 5))
-        title_lbl = self._lbl(hdr, text=title, font=(UI_FONT, 10, "bold"))
+        title_lbl = self._lbl(hdr, text=title, font=self._F(1, "bold"))
         title_lbl.pack(side="left")
         # 2px ink rule under each section head (Bauhaus structure; colored
         # per theme in _apply_brand)
@@ -2526,7 +2880,7 @@ class App:
                  "Axis", "Limits & scale", "Ticks", "Frame & grid", "Colors & colormap", "Fonts",
                  "Title & axis labels", "Legend", "Colorbar", "Reference guides",
                  "Smoothing", "Defringe",
-                 "Presets & projects", "Traces  (check = show,  D = decompression)",
+                 "Presets & projects", "Traces",
                  "Export", "Figure"]
         by_key = {r["key"]: r for r in getattr(self, "_collapsibles", [])}
         cat_of = getattr(self, "_section_cat", {})
@@ -2681,26 +3035,31 @@ class App:
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
+        self.canvas.mpl_connect("pick_event", self._on_pick)
         self._build_drawer(self._center_pw)   # drawer is a pane, added on toggle
-        # bottom bar: slim plot toolbar (left) + status (center) + Data (right)
+        # bottom bar, two lines: buttons never fight the status text for
+        # room (the placed status label used to cover / clip them)
         barwrap = ttk.Frame(p); barwrap.pack(side="bottom", fill="x",
-                                             pady=(4, 4))
+                                             pady=(4, 2))
         self._center_barwrap = barwrap
-        self._build_plot_toolbar(barwrap)
-        centerf = ttk.Frame(barwrap)
-        centerf.place(relx=0.5, rely=0.5, anchor="center")
-        self.status_lbl = self._lbl(centerf, text="", anchor="center",
-                                    font=(UI_FONT, 8), foreground="#888")
-        self.status_lbl.pack()
-        self.cursor_lbl = self._lbl(centerf, text="", anchor="center",
-                                    font=("Consolas", 8))
-        self.cursor_lbl.pack()
-        # prominent Data-table toggle, moved off the tab strip to the bottom
-        self._data_btn = self._brand_button(barwrap, " Data table",
+        brow1 = ttk.Frame(barwrap); brow1.pack(side="bottom", fill="x")
+        self._data_btn = self._brand_button(brow1, " Data table",
                                             self._toggle_drawer)
         self._data_btn.pack(side="right", padx=(0, 6))
         Tooltip(self._data_btn, "Show/hide the raw data table for the current "
                                 "trace; drag its top edge to resize (Ctrl+D).")
+        self._build_plot_toolbar(brow1)
+        brow2 = ttk.Frame(barwrap); brow2.pack(side="bottom", fill="x",
+                                               padx=6, pady=(0, 2))
+        self.status_lbl = self._lbl(brow2, text="", font=self._F(-1),
+                                    foreground="#888")
+        self.status_lbl.pack(side="left")
+        Tooltip(self.status_lbl, "Active tab, plot mode, style preset, and "
+                                 "how many of the loaded traces are shown.")
+        self.cursor_lbl = self._lbl(brow2, text="",
+                                    font=self._F(-1, mono=True))
+        self.cursor_lbl.pack(side="right")
+        Tooltip(self.cursor_lbl, "Cursor position in data coordinates.")
         # clickable "recent runs" strip, shown on the blank state only
         self._recent_bar = tk.Frame(p)
 
@@ -2727,7 +3086,7 @@ class App:
             Tooltip(b, tip)
             self._tb_btns[key] = b
             return b
-        mk("reset", "Reset view", self._reset_view,
+        mk("reset", "Reset", self._reset_view,
            "Reset the view to auto-fit (2D and 3D).")
         self._pan_btn = mk("pan", "", self._toolbar_pan,
                            "Pan: drag to move; click again to turn off.")
@@ -2799,7 +3158,7 @@ class App:
         hdr = ttk.Frame(self._drawer, padding=(4, 3)); hdr.pack(side="top",
                                                                 fill="x")
         self._drawer_title = self._lbl(hdr, text="Raw data",
-                                       font=(UI_FONT, 10, "bold"))
+                                       font=self._F(1, "bold"))
         self._drawer_title.pack(side="left", padx=(2, 6))
         self.drawer_trace = tk.StringVar()
         self._drawer_combo = ttk.Combobox(hdr, textvariable=self.drawer_trace,
@@ -2983,7 +3342,7 @@ class App:
         inner.pack(fill="x", padx=10, pady=5)
         self.raw_banner_inner = inner   # recolored along with the banner
         self.raw_banner_lbl = tk.Label(inner, text="", anchor="w",
-                                       font=(UI_FONT, 10))
+                                       font=self._F(1))
         self.raw_banner_lbl.pack(side="left", fill="x", expand=True)
         self.raw_banner_btn = tk.Button(inner, text="Show channel",
                                         relief="flat", bd=0, cursor="hand2",
@@ -3382,7 +3741,7 @@ class App:
     # ---- right pane: scrollable controls (width follows the pane) --------
     def _build_right(self, outer):
         self._lbl(outer, text="Plotting Options",
-                  font=(UI_FONT, 11, "bold")).pack(side="top", anchor="w",
+                  font=self._F(2, "bold")).pack(side="top", anchor="w",
                                                        padx=6, pady=(6, 2))
         srow = ttk.Frame(outer); srow.pack(side="top", fill="x", padx=6, pady=(0, 3))
         self._lbl(srow, text="Find:").pack(side="left")
@@ -3426,13 +3785,15 @@ class App:
         cbar = ttk.Frame(outer)
         cbar.pack(side="top", fill="x", padx=6, pady=(0, 2))
         self._collapse_btn = ttk.Button(cbar, text="Collapse all", width=13,
+                   style="Compact.TButton",
                    command=lambda: self._collapse_all(True))
         self._collapse_btn.pack(side="left")
         self._expand_btn = ttk.Button(cbar, text="Expand all", width=12,
+                   style="Compact.TButton",
                    command=lambda: self._collapse_all(False))
         self._expand_btn.pack(side="left", padx=(4, 0))
         self._resetall_btn = ttk.Button(cbar, text="Reset all", width=11,
-                   command=self._reset_all)
+                   style="Compact.TButton", command=self._reset_all)
         self._resetall_btn.pack(side="right")
         self.rnotebook = ttk.Notebook(outer)
         self.rnotebook.pack(side="top", fill="both", expand=True)
@@ -3456,7 +3817,7 @@ class App:
             ("Axes", ["Axis", "Limits & scale", "Ticks", "Frame & grid"]),
             ("Style", ["Colors & colormap", "Fonts", "Title & axis labels", "Legend", "Colorbar", "Reference guides"]),
             ("Data", ["Smoothing", "Defringe",
-                      "Traces  (check = show,  D = decompression)"]),
+                      "Traces"]),
             ("Export", ["Presets & projects", "Export", "Figure"]),
         ]
         for _label, _titles in _tabspec:
@@ -3609,7 +3970,7 @@ class App:
             eb.bind("<Return>", lambda e: self._apply_limits())
             ea.bind("<Button-3>", lambda e, v=a: self._reset_field(v))
             eb.bind("<Button-3>", lambda e, v=b: self._reset_field(v))
-        self._lim_hint = self._lbl(lim, text="", font=(UI_FONT, 8),
+        self._lim_hint = self._lbl(lim, text="", font=self._F(-1),
                                    foreground="#888")
         self._lim_hint.pack(anchor="w")
         scl = ttk.Frame(lim); scl.pack(fill="x", pady=(4, 1))
@@ -3657,9 +4018,18 @@ class App:
         ttk.Checkbutton(twod, text="Dash decompression (D) traces",
                         variable=self.dash_decomp,
                         command=self._redraw).pack(anchor="w", pady=(4, 1))
+        self.df_compare = tk.BooleanVar(value=False)
+        dfcc = ttk.Checkbutton(twod, text="Defringe compare (selected trace)",
+                               variable=self.df_compare,
+                               command=self._redraw)
+        dfcc.pack(anchor="w", pady=(0, 1))
+        Tooltip(dfcc, "With defringe on: click a curve to select it, and its "
+                      "pre-defringe absorbance is drawn behind it as a gray "
+                      "dashed line, so you can see exactly what the notch "
+                      "removed.")
         ttk.Separator(twod, orient="horizontal").pack(fill="x", pady=4)
         self._lbl(twod, text="Curve line",
-                  font=(UI_FONT, 8, "bold")).pack(anchor="w", pady=(12, 3))
+                  font=self._F(-1, "bold")).pack(anchor="w", pady=(12, 3))
         self.lw = tk.DoubleVar(value=1.0)
         lwsc, _lwe = self._slider_row(twod, "Line width", self.lw, 0.3, 3.0, "%.2f")
         Tooltip(lwsc, "Curve line thickness. Type an exact value or drag.")
@@ -3689,7 +4059,7 @@ class App:
             e1.bind("<Button-3>", lambda e, v=mv: self._reset_field(v, "tick"))
             e2.bind("<Button-3>", lambda e, v=nv: self._reset_field(v, "tick"))
         self._lbl(at, text="spacing in axis units; blank = auto  (Z = 3D only)",
-                  font=(UI_FONT, 8), foreground="#888").pack(anchor="w")
+                  font=self._F(-1), foreground="#888").pack(anchor="w")
         d1 = ttk.Frame(at); d1.pack(fill="x", pady=(3, 0))
         self._lbl(d1, text="Marks", width=7).pack(side="left")
         self.tick_dir = tk.StringVar(value="out")
@@ -3855,7 +4225,7 @@ class App:
         # packs it ONLY when there is text (an always-packed empty label left
         # a dead gap at the bottom of this box).
         self.fallback_lbl = self._lbl(d, text="", foreground="#a60",
-                                      wraplength=260, font=(UI_FONT, 8))
+                                      wraplength=260, font=self._F(-1))
 
 
         # --- Aspect ratio (2D plot box) ---
@@ -3882,7 +4252,7 @@ class App:
         # --- View: pan pad + zoom, folded into 2D plot options (the 2D
         # counterpart of the 3D camera controls)
         ttk.Separator(twod, orient="horizontal").pack(fill="x", pady=(8, 4))
-        self._lbl(twod, text="View", font=(UI_FONT, 10, "bold")).pack(
+        self._lbl(twod, text="View", font=self._F(1, "bold")).pack(
             anchor="w")
         vw = twod
         vrow = ttk.Frame(vw); vrow.pack(fill="x")
@@ -3923,7 +4293,7 @@ class App:
                             variable=self.zoom2d_axis).pack(side="left",
                                                             padx=(0, 4))
         self._lbl(vw, text="Drag a box on the plot, scroll to zoom at the "
-                           "cursor, 0 = fit.", font=(UI_FONT, 8),
+                           "cursor, 0 = fit.", font=self._F(-1),
                   foreground="#888").pack(anchor="w", pady=(3, 0))
 
         # --- Waterfall ---
@@ -3940,8 +4310,8 @@ class App:
         sr = ttk.Frame(wf); sr.pack(fill="x")
         self._lbl(sr, text="Offset/step", width=9).pack(side="left")
         self.wf_step = tk.StringVar(value="0.2")
-        wse = ttk.Entry(sr, textvariable=self.wf_step)
-        wse.pack(side="left", fill="x", expand=True)
+        wse = ttk.Entry(sr, textvariable=self.wf_step, width=7)
+        wse.pack(side="left")
         ttk.Button(sr, text="Apply", command=self._redraw).pack(side="left")
         ttk.Button(sr, text="Auto", command=self._auto_offset).pack(side="left",
                                                                     padx=(3, 0))
@@ -4077,7 +4447,7 @@ class App:
             for v in (cvar, svar):
                 v.trace_add("write", lambda *a: self._redraw())
         self._lbl(mk, text="Vertical lines - wavelength (nm)",
-                  font=(UI_FONT, 8, "bold")).pack(anchor="w", pady=(12, 3))
+                  font=self._F(-1, "bold")).pack(anchor="w", pady=(12, 3))
         self.markers = tk.StringVar()
         ev = ttk.Entry(mk, textvariable=self.markers); ev.pack(fill="x")
         ev.bind("<Return>", lambda e: self._redraw())
@@ -4101,7 +4471,7 @@ class App:
                    command=self._clear_markers).pack(side="left", padx=(3, 0))
         ttk.Separator(mk, orient="horizontal").pack(fill="x", pady=4)
         self._lbl(mk, text="Horizontal lines - absorbance",
-                  font=(UI_FONT, 8, "bold")).pack(anchor="w", pady=(12, 3))
+                  font=self._F(-1, "bold")).pack(anchor="w", pady=(12, 3))
         self.hmarkers = tk.StringVar()
         eh = ttk.Entry(mk, textvariable=self.hmarkers); eh.pack(fill="x")
         eh.bind("<Return>", lambda e: self._redraw())
@@ -4236,7 +4606,7 @@ class App:
                      "blank for no title.")
         ttk.Separator(lg, orient="horizontal").pack(fill="x", pady=(8, 4))
         self._lbl(lg, text="Frame (shared with colorbar)",
-                  font=(UI_FONT, 8, "bold")).pack(anchor="w", pady=(0, 3))
+                  font=self._F(-1, "bold")).pack(anchor="w", pady=(0, 3))
         self.legend_border = tk.BooleanVar(value=True)
         lbck = ttk.Checkbutton(lg, text="Border box", variable=self.legend_border,
                                command=self._redraw)
@@ -4328,7 +4698,7 @@ class App:
         self.font_size = tk.IntVar(value=10)   # base size; per-item sizes are
                                                # set next to each text control
         self._lbl(ft, text="(text sizes are set next to each item)",
-                  font=(UI_FONT, 8), foreground="#888").pack(anchor="w")
+                  font=self._F(-1), foreground="#888").pack(anchor="w")
 
         # --- Presets (named, stored with the app) ---
         pr = self._group(r, "Presets & projects")
@@ -4349,9 +4719,9 @@ class App:
         Tooltip(self.preset_cb, "Saved control states. Pick one and click Load.")
         ttk.Separator(pr, orient="horizontal").pack(fill="x", pady=4)
         self._lbl(pr, text="Project = every setting + the folders",
-                  font=(UI_FONT, 8, "bold")).pack(anchor="w", pady=(12, 3))
+                  font=self._F(-1, "bold")).pack(anchor="w", pady=(12, 3))
         self._lbl(pr, text="(presets above store styling only)",
-                  font=(UI_FONT, 8), foreground="#888").pack(anchor="w")
+                  font=self._F(-1), foreground="#888").pack(anchor="w")
         srow = ttk.Frame(pr); srow.pack(fill="x", pady=(4, 1))
         ssb = ttk.Button(srow, text="Save project...", command=self._save_session)
         ssb.pack(side="left", fill="x", expand=True)
@@ -4363,7 +4733,10 @@ class App:
                      "where you left off. Presets cover styling only.")
 
         # --- Traces (show + D toggle) ---
-        tr = self._group(r, "Traces  (check = show,  D = decompression)")
+        tr = self._group(r, "Traces")
+        self._lbl(tr, text="check = show,  D = decompression",
+                  font=self._F(-1), foreground="#888").pack(anchor="w",
+                                                            pady=(0, 2))
         bb = ttk.Frame(tr); bb.pack(fill="x")
         ttk.Button(bb, text="All", width=5,
                    command=lambda: self._set_all(True)).pack(side="left")
@@ -4387,7 +4760,7 @@ class App:
                      "read the C trend alone.")
         Tooltip(odb, "Show only decompression (D) traces; hide all C. Lets you "
                      "read the D trend alone.")
-        self.trace_count_lbl = self._lbl(bb2, text="", font=(UI_FONT, 8))
+        self.trace_count_lbl = self._lbl(bb2, text="", font=self._F(-1))
         self.trace_count_lbl.pack(side="right")
         self.trace_frame = ttk.Frame(tr); self.trace_frame.pack(fill="x")
         exb = ttk.Button(tr, text="Export D list (CSV) by selection",
@@ -4441,43 +4814,46 @@ class App:
         # background, so panel-colored labels inside them show as mismatched
         # patches (worst on the black theme). A plain frame follows the
         # configured background exactly; separators give it the grouped look.
-        bar = ttk.Frame(outer, padding=(8, 2))
-        bar.pack(side="top", fill="x", padx=6, pady=(2, 2), before=self.rnotebook)
-        ttk.Separator(outer, orient="horizontal").pack(
-            side="top", fill="x", padx=6, pady=(0, 4), before=self.rnotebook)
-        self._qa_title = self._lbl(bar, text="Quick access",
-                                   font=(UI_FONT, 10, "bold"))
-        self._qa_title.pack(pady=(0, 2))
+        _qac = self._card(outer)
+        _qac.pack(side="top", fill="x", padx=6, pady=(2, 6),
+                  before=self.rnotebook)
+        bar = _qac.body
+        self._qa_title = self._lbl(_qac, text="Quick Access",
+                                   font=self._F(1, "bold"))
+        _qac.set_title(self._qa_title, anchor="center")
         # two compact rows so nothing clips at larger font sizes:
         # row 1 = waterfall + line width; row 2 = the two toggles
         b1 = ttk.Frame(bar); b1.pack(fill="x")
         self._lbl(b1, text="wf").pack(side="left")
         wfc = ttk.Combobox(b1, textvariable=self.wf_mode, state="readonly",
                            width=9, values=["off", "2D stacked", "3D ridge"])
-        wfc.pack(side="left", padx=(3, 0), fill="x", expand=True)
         Tooltip(wfc, "Waterfall mode: off (shared baseline), 2D stacked, or "
                      "3D ridge. Keys 1 / 2 / 3.")
-        smc = ttk.Checkbutton(b1, text="sm", variable=self.show_smooth,
-                              command=self._redraw)
-        smc.pack(side="left", padx=(6, 0))
-        Tooltip(smc, "smooth")
+        lwe = ttk.Entry(b1, textvariable=self.lw, width=4)
+        lwe.pack(side="right")
+        self._lbl(b1, text="lw").pack(side="right", padx=(6, 2))
         dfc = ttk.Checkbutton(b1, text="df", variable=self.show_notch,
                               command=self._toggle_notch)
-        dfc.pack(side="left", padx=(4, 0))
+        dfc.pack(side="right", padx=(4, 0))
         Tooltip(dfc, "defringe")
-        self._lbl(b1, text="lw").pack(side="left", padx=(6, 0))
-        lwe = ttk.Entry(b1, textvariable=self.lw, width=4); lwe.pack(side="left")
+        smc = ttk.Checkbutton(b1, text="sm", variable=self.show_smooth,
+                              command=self._redraw)
+        smc.pack(side="right", padx=(6, 0))
+        Tooltip(smc, "smooth")
+        wfc.pack(side="left", padx=(3, 0), fill="x", expand=True)
         Tooltip(lwe, "lw = line width of the curves.")
         lwe.bind("<Return>", lambda e: self._redraw())
         lwe.bind("<FocusOut>", lambda e: self._redraw())
         b2 = ttk.Frame(bar); b2.pack(fill="x", pady=(4, 1))
         self._lbl(b2, text="cmap").pack(side="left")
-        rvb = ttk.Button(b2, text="Reset view", width=10,
-                         command=self._reset_view)
+        self.plot_theme_bg = tk.BooleanVar(value=True)
+        rvb = ttk.Checkbutton(b2, text="theme bg",
+                              variable=self.plot_theme_bg,
+                              command=self._redraw)
         rvb.pack(side="right", padx=(4, 0))
-        Tooltip(rvb, "Reset the view: clears any 2D zoom/pan back to auto-fit "
-                     "and returns the 3D camera (elevation, azimuth, zoom) to "
-                     "default.")
+        Tooltip(rvb, "Plot background: checked = match the interface theme "
+                     "color, unchecked = classic white page. Export face "
+                     "color is separate (Figure box).")
         ttk.Combobox(b2, textvariable=self.cmap, state="readonly",
                      values=colormaps.available()).pack(side="left", fill="x",
                                                         expand=True, padx=(3, 0))
@@ -4504,6 +4880,7 @@ class App:
                     "Stretch Z": "arr_v", "3D line width": "widthI",
                     "3D line opacity": "opacity",
                     "3D detail (points/ridge)": "detail",
+                    "Pane opacity": "opacity", "Frame width": "widthI",
                     "Line width": "widthI", "Raw opacity": "opacity",
                     "Notch width %": "widthI"}.get(label)
         box = ttk.Frame(parent); box.pack(fill="x", pady=(8, 5))
@@ -4626,22 +5003,133 @@ class App:
 
     # ---- 3D-ridge options (placed under Waterfall) -----------------------
     def _build_3d_opts(self, r):
-        # 3D plot options (journal-clean defaults; toggle to revert)
+        # 3D plot options, sectioned so the box/pane/camera controls are
+        # obvious: Camera / Box & panes / Ridges / Layout & speed
         td = self._group(r, "3D plot options")
-        self.wf3d_even = tk.BooleanVar(value=False)
-        evck = ttk.Checkbutton(td, text="Even rank spacing", variable=self.wf3d_even,
-                               command=self._redraw)
-        evck.pack(anchor="w")
-        Tooltip(evck, "Space ridges evenly along the pressure axis (1,2,3...) "
-                      "regardless of the real GPa gaps, so crowded pressures stay "
-                      "readable. Uncheck to place each ridge at its true pressure.")
-        # appearance: walls (filled ridges), walls only, or traces only
-        self.wf3d_fill = tk.BooleanVar(value=True)    # derived from the selector
+
+        def _sec(title, first=False):
+            if not first:
+                ttk.Separator(td, orient="horizontal").pack(
+                    fill="x", pady=(8, 2))
+            self._lbl(td, text=title, font=self._F(1, "bold")).pack(
+                anchor="w", pady=(0, 2))
+
+        # ---------------- Camera ----------------
+        _sec("Camera", first=True)
+        self.wf3d_elev = tk.DoubleVar(value=22)
+        esc, _ee = self._slider_row(td, "Elevation", self.wf3d_elev,
+                                    0, 90, "%.0f")
+        Tooltip(esc, "Camera elevation angle (degrees above the horizon). "
+                     "Arrow keys orbit while the 3D view is active.")
+        self.wf3d_azim = tk.DoubleVar(value=-60)
+        asc2, _ae = self._slider_row(td, "Azimuth", self.wf3d_azim,
+                                     -180, 180, "%.0f")
+        Tooltip(asc2, "Camera azimuth: rotate the scene left/right (degrees).")
+        self.wf3d_zoom = tk.DoubleVar(value=1.0)
+        scz, _z = self._slider_row(td, "Zoom", self.wf3d_zoom,
+                                   0.5, 2.0, "%.2f")
+        Tooltip(scz, "Zoom the 3D view in/out (camera distance). Keys + / -.")
+        cpr = ttk.Frame(td); cpr.pack(fill="x", pady=(4, 1))
+        self._lbl(cpr, text="View").pack(side="left")
+        for _t, _e, _a in [("Iso", 22, -60), ("Front", 8, -90),
+                           ("Side", 8, 0), ("Top", 89, -90)]:
+            ttk.Button(cpr, text=_t, width=5,
+                       command=lambda e=_e, a=_a: self._cam_preset(e, a)
+                       ).pack(side="left", padx=(2, 0))
+        ttk.Button(cpr, text="Reset", width=6,
+                   command=self._reset_3d_view).pack(side="left", padx=(6, 0))
+        Tooltip(cpr, "Snap the camera to a standard angle, then fine-tune "
+                     "with the sliders above. Key 0 resets the camera.")
+
+        # ---------------- Box & panes ----------------
+        _sec("Box & panes")
+        bfr = ttk.Frame(td); bfr.pack(fill="x", pady=(2, 1))
+        self._lbl(bfr, text="Box frame", width=11).pack(side="left")
+        self.wf3d_frame = tk.StringVar(value="open front")
+        bfc = ttk.Combobox(bfr, textvariable=self.wf3d_frame,
+                           state="readonly", width=11,
+                           values=["open front", "closed", "floor only",
+                                   "no top", "none", "custom"])
+        bfc.pack(side="left")
+        Tooltip(bfc, "Which box edges are drawn. 'open front' keeps the "
+                     "corner facing you open (nothing between you and the "
+                     "data); 'closed' draws all 12 edges; 'floor only' and "
+                     "'no top' are lighter looks; 'custom' unlocks the "
+                     "Edges checkboxes below; 'none' removes every edge.")
+        shr = ttk.Frame(td); shr.pack(fill="x", pady=(2, 1))
+        self._lbl(shr, text="Frame shade", width=11).pack(side="left")
+        self.wf3d_frame_color = tk.StringVar(value="auto")
+        shc = ttk.Combobox(shr, textvariable=self.wf3d_frame_color,
+                           state="readonly", width=11,
+                           values=["auto", "black", "dark gray", "gray",
+                                   "light gray", "white"])
+        shc.pack(side="left")
+        self.wf3d_frame_color.trace_add("write", lambda *a: self._redraw())
+        Tooltip(shc, "Color of the box edges. 'auto' follows the theme's "
+                     "axis color; lighter shades recede into the page.")
+        self.wf3d_fr_floor = tk.BooleanVar(value=True)
+        self.wf3d_fr_posts = tk.BooleanVar(value=True)
+        self.wf3d_fr_top = tk.BooleanVar(value=True)
+        self.wf3d_fr_open = tk.BooleanVar(value=True)
+        cer = ttk.Frame(td); cer.pack(fill="x", pady=(0, 1))
+        self._lbl(cer, text="Edges", width=11).pack(side="left")
+        self._fr_checks = []
+        for _txt, _var, _tip in (
+                ("floor", self.wf3d_fr_floor, "The 4 bottom edges."),
+                ("posts", self.wf3d_fr_posts, "The 4 vertical edges."),
+                ("top", self.wf3d_fr_top, "The 4 top-rim edges."),
+                ("open front", self.wf3d_fr_open,
+                 "Skip the edges meeting at the corner nearest the camera.")):
+            _ck = ttk.Checkbutton(cer, text=_txt, variable=_var,
+                                  command=self._redraw)
+            _ck.pack(side="left", padx=(0, 4))
+            Tooltip(_ck, _tip + " Active when Box frame is 'custom'.")
+            self._fr_checks.append(_ck)
+
+        def _sync_frame_custom(*_a):
+            stt = ("normal" if self.wf3d_frame.get() == "custom"
+                   else "disabled")
+            for _c in self._fr_checks:
+                _c.configure(state=stt)
+            self._redraw()
+        self.wf3d_frame.trace_add("write", _sync_frame_custom)
+        for _c in self._fr_checks:
+            _c.configure(state="disabled")
+        pnr = ttk.Frame(td); pnr.pack(fill="x", pady=(2, 1))
+        self._lbl(pnr, text="Panes", width=11).pack(side="left")
+        self.wf3d_panes = tk.StringVar(value="white")
+        pnc = ttk.Combobox(pnr, textvariable=self.wf3d_panes,
+                           state="readonly", width=11,
+                           values=["white", "theme", "light gray", "off"])
+        pnc.pack(side="left")
+        self.wf3d_panes.trace_add("write", lambda *a: self._redraw())
+        Tooltip(pnc, "The three back walls. 'white' = clean print look "
+                     "(dark themes keep dark panes), 'theme' matches the "
+                     "interface color, 'off' = transparent walls. Gridline "
+                     "style is set in the Axes box.")
+        # legacy: 'Clean panes' checkbox from old presets/sessions maps here
+        self.wf3d_clean = tk.BooleanVar(value=True)
+        self.wf3d_clean.trace_add(
+            "write", lambda *a: self.wf3d_panes.set(
+                "white" if self.wf3d_clean.get() else "off"))
+        self.wf3d_pane_alpha = tk.DoubleVar(value=1.0)
+        pas, _pa = self._slider_row(td, "Pane opacity", self.wf3d_pane_alpha,
+                                    0.0, 1.0, "%.2f")
+        Tooltip(pas, "Opacity of the three back walls (0 = see-through).")
+        self.wf3d_frame_lw = tk.DoubleVar(value=0.8)
+        fws, _fw = self._slider_row(td, "Frame width", self.wf3d_frame_lw,
+                                    0.2, 3.0, "%.2f")
+        Tooltip(fws, "Thickness of the drawn box edges.")
+
+        # ---------------- Ridges ----------------
+        _sec("Ridges")
+        self.wf3d_fill = tk.BooleanVar(value=True)    # derived from selector
         self.wf3d_lines = tk.BooleanVar(value=True)   # draw the ridge outline
         self.wf3d_look = tk.StringVar(value="Walls + traces")
         lkr = ttk.Frame(td); lkr.pack(fill="x")
         self._lbl(lkr, text="3D look").pack(side="left")
-        ttk.Combobox(lkr, textvariable=self.wf3d_look, state="readonly", width=14,
+        ttk.Combobox(lkr, textvariable=self.wf3d_look, state="readonly",
+                     width=14,
                      values=["Walls + traces", "Walls only", "Traces only"]
                      ).pack(side="left", padx=(3, 0))
         def _apply_look(*_a):
@@ -4658,82 +5146,20 @@ class App:
                               variable=self.wf3d_color_traces,
                               command=self._redraw)
         ctc.pack(anchor="w")
-        Tooltip(ctc, "Colour the ridge outlines with the trace colormap instead "
-                     "of flat black/white. Pairs well with Traces only.")
-        self.wf3d_clean = tk.BooleanVar(value=True)
-        clck = ttk.Checkbutton(td, text="Clean panes (white, faint grid)",
-                               variable=self.wf3d_clean, command=self._redraw)
-        clck.pack(anchor="w")
-        Tooltip(clck, "Paint the three back walls a solid colour so ridges read "
-                      "clearly. Uncheck for matplotlib's default transparent panes. "
-                      "Gridline style is set in the Axes box.")
-        bfr = ttk.Frame(td); bfr.pack(fill="x", pady=(2, 1))
-        self._lbl(bfr, text="Box frame", width=10).pack(side="left")
-        self.wf3d_frame = tk.StringVar(value="open front")
-        bfc = ttk.Combobox(bfr, textvariable=self.wf3d_frame,
-                           state="readonly", width=11,
-                           values=["open front", "closed", "none"])
-        bfc.pack(side="left")
-        self.wf3d_frame.trace_add("write", lambda *a: self._redraw())
-        Tooltip(bfc, "Box edges: 'open front' keeps the corner facing you "
-                     "open (classic look, nothing between you and the "
-                     "data); 'closed' draws all 12 edges; 'none' leaves "
-                     "only the walls.")
-        self.wf3d_zlog = tk.BooleanVar(value=False)
-        zlck = ttk.Checkbutton(td, text="Log Z (absorbance) scale",
-                               variable=self.wf3d_zlog, command=self._redraw)
-        zlck.pack(anchor="w")
-        Tooltip(zlck, "Plot the Z (absorbance) axis on a base-10 log scale. 3D "
-                      "axes have no native log mode, so values are log10 "
-                      "transformed and ticks relabelled as powers of ten; "
-                      "non-positive values are dropped.")
+        Tooltip(ctc, "Colour the ridge outlines with the trace colormap "
+                     "instead of flat black/white. Pairs well with Traces "
+                     "only.")
         self.wf3d_alpha = tk.DoubleVar(value=0.5)
         sc, _e = self._slider_row(td, "Fill opacity", self.wf3d_alpha,
                                   0.0, 1.0, "%.2f")
-        Tooltip(sc, "Transparency of each filled wall. Lower = more see-through.")
-        self.wf3d_elev = tk.DoubleVar(value=22)
-        esc, _ee = self._slider_row(td, "Elevation", self.wf3d_elev, 0, 90, "%.0f")
-        Tooltip(esc, "Camera elevation angle (degrees above the horizon).")
-        self.wf3d_azim = tk.DoubleVar(value=-60)
-        asc2, _ae = self._slider_row(td, "Azimuth", self.wf3d_azim, -180, 180, "%.0f")
-        Tooltip(asc2, "Camera azimuth: rotate the scene left/right (degrees).")
-        self.wf3d_zoom = tk.DoubleVar(value=1.0)
-        scz, _z = self._slider_row(td, "Zoom", self.wf3d_zoom, 0.5, 2.0, "%.2f")
-        Tooltip(scz, "Zoom the 3D view in/out (camera distance).")
-        # camera quick-presets
-        cpr = ttk.Frame(td); cpr.pack(fill="x", pady=(4, 1))
-        self._lbl(cpr, text="View").pack(side="left")
-        for _t, _e, _a in [("Iso", 22, -60), ("Front", 8, -90),
-                           ("Side", 8, 0), ("Top", 89, -90)]:
-            ttk.Button(cpr, text=_t, width=5,
-                       command=lambda e=_e, a=_a: self._cam_preset(e, a)
-                       ).pack(side="left", padx=(2, 0))
-        Tooltip(cpr, "Snap the camera to a standard angle, then fine-tune with "
-                     "the Elevation / Azimuth sliders above.")
-        # box stretch: make the 3D box a rectangle without respacing the data
-        self.wf3d_sx = tk.DoubleVar(value=1.0)
-        self.wf3d_sy = tk.DoubleVar(value=1.0)
-        self.wf3d_sz = tk.DoubleVar(value=1.0)
-        ssx, _ssx = self._slider_row(td, "Stretch X", self.wf3d_sx,
-                                     0.3, 6.0, "%.2f")
-        Tooltip(ssx, "Stretch the 3D box along the spectral (wavelength) axis "
-                     "without respacing the data. Right-click resets.")
-        ssy, _ssy = self._slider_row(td, "Stretch Y", self.wf3d_sy,
-                                     0.3, 6.0, "%.2f")
-        Tooltip(ssy, "Stretch the pressure axis to fan out crowded ridges "
-                     "without respacing the data. Right-click resets.")
-        ssz, _ssz = self._slider_row(td, "Stretch Z", self.wf3d_sz,
-                                     0.3, 6.0, "%.2f")
-        Tooltip(ssz, "Stretch the height (absorbance) axis. Right-click resets.")
-        ttk.Button(td, text="Reset stretch", width=14,
-                   command=self._reset_stretch).pack(anchor="w", pady=(0, 2))
-        # 3D outline width (independent of the 2D curve width)
+        Tooltip(sc, "Transparency of each filled wall. Lower = more "
+                    "see-through.")
         self.wf3d_lw = tk.DoubleVar(value=1.0)
         lwsc3, _lw3 = self._slider_row(td, "3D line width", self.wf3d_lw,
                                        0.3, 4.0, "%.2f")
         Tooltip(lwsc3, "Thickness of the 3D ridge outlines.")
         ecr = ttk.Frame(td); ecr.pack(fill="x")
-        self._lbl(ecr, text="3D line color", width=10).pack(side="left")
+        self._lbl(ecr, text="3D line color", width=11).pack(side="left")
         self.wf3d_edge_color = tk.StringVar(value="auto")
         eccb = ttk.Combobox(ecr, textvariable=self.wf3d_edge_color,
                             state="readonly", width=10,
@@ -4741,14 +5167,66 @@ class App:
                                     "#888888", "#cccccc", "#444444"])
         eccb.pack(side="left", fill="x", expand=True)
         self.wf3d_edge_color.trace_add("write", lambda *a: self._redraw())
-        Tooltip(eccb, "Outline color of the 3D ridge edges. 'auto' = white on "
-                      "dark themes, black on light. Set explicitly to override.")
+        Tooltip(eccb, "Outline color of the 3D ridge edges. 'auto' = white "
+                      "on dark themes, black on light.")
         self.wf3d_edge_alpha = tk.DoubleVar(value=0.9)
-        easc, _eae = self._slider_row(td, "3D line opacity", self.wf3d_edge_alpha,
-                                      0.0, 1.0, "%.2f")
+        easc, _eae = self._slider_row(td, "3D line opacity",
+                                      self.wf3d_edge_alpha, 0.0, 1.0, "%.2f")
         Tooltip(easc, "Opacity of the 3D ridge outlines (0 = no outline).")
-        # axis label gaps: distance from each axis's tick numbers to its title.
-        # Bigger values stop a long number (e.g. 26000) clipping the axis name.
+        self.wf3d_project = tk.StringVar(value="Off")
+        prr = ttk.Frame(td); prr.pack(fill="x", pady=(4, 1))
+        self._lbl(prr, text="Project").pack(side="left")
+        ttk.Combobox(prr, textvariable=self.wf3d_project, state="readonly",
+                     width=10, values=["Off", "Back wall", "Floor", "Both"]
+                     ).pack(side="left", padx=(3, 0))
+        self.wf3d_project.trace_add("write", lambda *a: self._redraw())
+        Tooltip(prr, "Drop a faint shadow of every trace onto the back wall "
+                     "(a 2D overlay) and/or the floor, as a depth and value "
+                     "cue.")
+        self.wf3d_zlog = tk.BooleanVar(value=False)
+        zlck = ttk.Checkbutton(td, text="Log Z (absorbance) scale",
+                               variable=self.wf3d_zlog, command=self._redraw)
+        zlck.pack(anchor="w")
+        Tooltip(zlck, "Plot the Z (absorbance) axis on a base-10 log scale. "
+                      "3D axes have no native log mode, so values are log10 "
+                      "transformed and ticks relabelled as powers of ten; "
+                      "non-positive values are dropped.")
+        self.wf3d_clip99 = tk.BooleanVar(value=False)
+        zcc = ttk.Checkbutton(td, text="Clip Z spikes (99th pct)",
+                              variable=self.wf3d_clip99, command=self._redraw)
+        zcc.pack(anchor="w")
+        Tooltip(zcc, "Cap the auto Z range at the 99th percentile so "
+                     "saturated spikes don't blow out the ridge scale. Off "
+                     "(default) shows the full data range. Typed Z limits "
+                     "always win.")
+        self.wf3d_even = tk.BooleanVar(value=False)
+        evck = ttk.Checkbutton(td, text="Even rank spacing",
+                               variable=self.wf3d_even, command=self._redraw)
+        evck.pack(anchor="w")
+        Tooltip(evck, "Space ridges evenly along the pressure axis (1,2,3...) "
+                      "regardless of the real GPa gaps, so crowded pressures "
+                      "stay readable. Uncheck to place each ridge at its true "
+                      "pressure.")
+
+        # ---------------- Layout & speed ----------------
+        _sec("Layout & speed")
+        self.wf3d_sx = tk.DoubleVar(value=1.0)
+        self.wf3d_sy = tk.DoubleVar(value=1.0)
+        self.wf3d_sz = tk.DoubleVar(value=1.0)
+        ssx, _ssx = self._slider_row(td, "Stretch X", self.wf3d_sx,
+                                     0.3, 6.0, "%.2f")
+        Tooltip(ssx, "Stretch the 3D box along the spectral (wavelength) "
+                     "axis without respacing the data. Right-click resets.")
+        ssy, _ssy = self._slider_row(td, "Stretch Y", self.wf3d_sy,
+                                     0.3, 6.0, "%.2f")
+        Tooltip(ssy, "Stretch the pressure axis to fan out crowded ridges "
+                     "without respacing the data. Right-click resets.")
+        ssz, _ssz = self._slider_row(td, "Stretch Z", self.wf3d_sz,
+                                     0.3, 6.0, "%.2f")
+        Tooltip(ssz, "Stretch the height (absorbance) axis. Right-click "
+                     "resets.")
+        ttk.Button(td, text="Reset stretch", width=14,
+                   command=self._reset_stretch).pack(anchor="w", pady=(0, 2))
         self.lblpad3d_x = tk.DoubleVar(value=15.0)
         self.lblpad3d_y = tk.DoubleVar(value=15.0)
         self.lblpad3d_z = tk.DoubleVar(value=10.0)
@@ -4763,47 +5241,30 @@ class App:
         lpz, _lpz = self._slider_row(td, "Label gap Z",
                                      self.lblpad3d_z, 0, 40, "%.0f")
         Tooltip(lpz, "Distance from the height-axis numbers to its title.")
-        # faint 2D shadow projections onto the back wall / floor
-        self.wf3d_project = tk.StringVar(value="Off")
-        prr = ttk.Frame(td); prr.pack(fill="x", pady=(4, 1))
-        self._lbl(prr, text="Project").pack(side="left")
-        ttk.Combobox(prr, textvariable=self.wf3d_project, state="readonly",
-                     width=10, values=["Off", "Back wall", "Floor", "Both"]
-                     ).pack(side="left", padx=(3, 0))
-        self.wf3d_project.trace_add("write", lambda *a: self._redraw())
-        Tooltip(prr, "Drop a faint shadow of every trace onto the back wall "
-                     "(a 2D overlay) and/or the floor, as a depth and value cue.")
         self.wf3d_detail = tk.IntVar(value=1000)
         dts, _dt = self._slider_row(td, "3D detail (points/ridge)",
                                     self.wf3d_detail, 200, 3000, "%.0f")
         Tooltip(dts, "Points kept per ridge when rendering 3D. Lower = much "
-                     "faster rotation on big spectra. Max keeps full resolution "
-                     "(the default). 2D plots and all exports always use full "
-                     "data.")
+                     "faster rotation on big spectra. Max keeps full "
+                     "resolution (the default). 2D plots and all exports "
+                     "always use full data.")
         self.perf_mode = tk.BooleanVar(value=False)
         pmc = ttk.Checkbutton(td, text="Performance mode (faster 3D)",
                               variable=self.perf_mode, command=self._redraw)
         pmc.pack(anchor="w")
-        Tooltip(pmc, "Off by default. When on, 3D rotation is much smoother on a "
-                     "laptop: ridges are decimated harder and the raw ghost is "
-                     "skipped. 2D plots and all exports are unaffected.")
+        Tooltip(pmc, "Off by default. When on, 3D rotation is much smoother "
+                     "on a laptop: ridges are decimated harder and the raw "
+                     "ghost is skipped. 2D plots and all exports are "
+                     "unaffected.")
         rmc = ttk.Checkbutton(td, text="Reduce motion (no UI animation)",
                               variable=self.reduce_motion)
         rmc.pack(anchor="w")
-        Tooltip(rmc, "Turn off the small one-shot UI animations (the raw-only "
-                     "banner reveal). They never run during plotting; this "
-                     "disables them entirely.")
-        self.wf3d_clip99 = tk.BooleanVar(value=False)
-        zcc = ttk.Checkbutton(td, text="Clip Z spikes (99th pct)",
-                              variable=self.wf3d_clip99, command=self._redraw)
-        zcc.pack(anchor="w")
-        Tooltip(zcc, "Cap the auto Z range at the 99th percentile so saturated "
-                     "spikes don't blow out the ridge scale. Off (default) "
-                     "shows the full data range. Typed Z limits always win.")
-        ttk.Button(td, text="Reset view", command=self._reset_3d_view).pack(
-            anchor="w", pady=(4, 1))
-        self._lbl(td, text="Z (absorbance) range is set in Limits & scale above.",
-                  font=(UI_FONT, 8), foreground="#888").pack(anchor="w")
+        Tooltip(rmc, "Turn off the small one-shot UI animations (the "
+                     "raw-only banner reveal). They never run during "
+                     "plotting; this disables them entirely.")
+        self._lbl(td, text="Z (absorbance) range is set in Limits & scale "
+                           "above.",
+                  font=self._F(-1), foreground="#888").pack(anchor="w")
 
     # ---- journal / figure controls ---------------------------------------
     def _journal_presets(self):
@@ -5120,14 +5581,14 @@ class App:
         muted = "#9aa0a6" if self.dark_mode.get() else "#6b7280"
         bar.configure(bg=uibg)
         tk.Label(bar, text="Recent runs:", bg=uibg, fg=muted,
-                 font=(UI_FONT, 10)).pack(side="left", padx=(10, 6))
+                 font=self._F(1)).pack(side="left", padx=(10, 6))
         for e in recents[:4]:
             base = os.path.basename(os.path.normpath(e.get("path", ""))) or "?"
             txt = "%s  (%d, %.0f-%.0f GPa)" % (base, e.get("n", 0),
                                                e.get("pmin", 0),
                                                e.get("pmax", 0))
             lab = tk.Label(bar, text=txt, bg=uibg, fg=accent,
-                           font=(UI_FONT, 10, "underline"),
+                           font=self._F(1, "underline"),
                            cursor="hand2", padx=6)
             lab.pack(side="left")
             lab.bind("<Button-1>",
@@ -5225,7 +5686,7 @@ class App:
             # bold neutral button; the ac2 gear icon (attached in
             # _apply_brand) is the signal, no competing accent fill
             ttk.Style().configure("NameFmt.TButton",
-                                  font=(UI_FONT, 10, "bold"))
+                                  font=self._F(0))
             self.profile_btn.config(text=" Name format:  " + nm,
                                     style="NameFmt.TButton")
         except tk.TclError:
@@ -5257,7 +5718,8 @@ class App:
         d = tk.Toplevel(self.root)
         d.title("Name format")
         d.transient(self.root)
-        d.geometry("1200x700")
+        d.geometry("1320x820")
+        d.minsize(1080, 680)
         d.grab_set()
         self._apply_titlebar(d)
 
@@ -5265,10 +5727,15 @@ class App:
         # smoothing dialog pattern); everything else goes in `main`
         main = ttk.Frame(d)
         main.pack(side="left", fill="both", expand=True)
-        helpf = ttk.LabelFrame(d, text="Guide", padding=8)
-        helpf.pack(side="right", fill="y", padx=(0, 10), pady=8)
+        _chp = self._card(d, grow="both", width=self._em() * 46)
+        _chp.pack(side="right", fill="y", padx=(0, 10), pady=8)
+        _chp.set_title(self._lf_header(_chp, "Guide"))
+        helpf = _chp.body
         ht = tk.Text(helpf, width=44, wrap="word", relief="flat",
-                     font=(UI_FONT, 10))
+                     font=self._F(1))
+        _ugb, _ufg2, _ufl2, _upb2, _upf2 = self._theme_palette()
+        ht.configure(background=_ugb, foreground=_ufg2,
+                     insertbackground=_ufg2)
         hsb = ttk.Scrollbar(helpf, command=ht.yview)
         ht.configure(yscrollcommand=hsb.set)
         hsb.pack(side="right", fill="y")
@@ -5286,6 +5753,11 @@ class App:
             "  = DAC Y04, sample Arch29, 12.5 GPa,\n"
             "    background, compression, segment 1.\n"
             "If your files look like that, just close this window.\n\n"
+            "GUESS FORMAT\n"
+            "The Guess format button (bottom row) reads the folder and fills "
+            "the grammar automatically: separator, pressure token, channel "
+            "keywords. Check the preview after: it is a starting point, "
+            "correct anything wrong, then Use this profile.\n\n"
             "TO SET UP A NEW SCHEME\n"
             "1.  Click 'Save as\u2026' and give your profile a name.\n"
             "2.  Set the separator (and prefix, decimal, keywords), then "
@@ -5297,13 +5769,17 @@ class App:
             "satisfies your working requirements, click 'Use this "
             "profile'.\n\n"
             "EXAMPLE\n"
-            "A hypothetical file named:  D42-fo90-15.3GPa-s-2.003\n"
-            "  Separator: '-'\n"
-            "  Prefix: blank\n"
-            "  Pressure decimal: '.'\n"
-            "  Strip units: 'gpa'\n"
-            "  Sample keyword(s): 's'\n"
-            "  Pieces labeled: dac / sample / pressure / role / rep\n\n"
+            "A name that uses every possible piece:\n"
+            "  vis-D42-fo90-15.3GPa-s-c-2.003\n"
+            "  vis = prefix (OPTIONAL; blank if none)\n"
+            "  D42 = dac, fo90 = sample (both REQUIRED)\n"
+            "  15.3GPa = pressure (OPTIONAL; missing = 0 GPa)\n"
+            "  s = channel keyword (OPTIONAL; none = dark)\n"
+            "  c = compression tag (OPTIONAL; d = decompression)\n"
+            "  2 = retake number (OPTIONAL)\n"
+            "  .003 = grating segment (OPTIONAL; none = single-stitch)\n"
+            "  Grammar boxes: separator '-', pressure decimal '.',"
+            "  strip units 'gpa', sample keyword 's'.\n\n"
             "FIXING ODD FILES\n"
             "Double-click any red row to type its fields by hand, or "
             "select it and press 'Exclude selected'. Fixes are "
@@ -5345,12 +5821,14 @@ class App:
         Tooltip(delb, "Delete the selected saved profile (the built-in "
                       "cannot be deleted).")
         hint = self._lbl(prow, text="", foreground="#888",
-                         font=(UI_FONT, 8))
+                         font=self._F(-1))
         hint.pack(side="left", padx=(10, 0))
 
         # -- grammar editor ---------------------------------------------------
-        ed = ttk.LabelFrame(main, text="Grammar", padding=8)
-        ed.pack(fill="x", padx=10, pady=(4, 2))
+        _ced = self._card(main)
+        _ced.pack(fill="x", padx=10, pady=(4, 2))
+        _ced.set_title(self._lf_header(_ced, "Grammar"))
+        ed = _ced.body
         r1 = ttk.Frame(ed); r1.pack(fill="x")
         v_prefix = tk.StringVar(); v_sep = tk.StringVar()
         v_seqsep = tk.StringVar(); v_dec = tk.StringVar()
@@ -5461,7 +5939,7 @@ class App:
                      "dark, so this can stay empty.")
         _ghost(dke, v_dk, "dark")
         self._lbl(r2, text="(no keyword = dark)", foreground="#888",
-                  font=(UI_FONT, 8)).pack(side="left")
+                  font=self._F(-1)).pack(side="left")
         r3 = ttk.Frame(ed); r3.pack(fill="x", pady=(4, 0))
         self._lbl(r3, text="Compression keyword(s)").pack(side="left")
         ce_ = ttk.Entry(r3, textvariable=v_c, width=10)
@@ -5478,13 +5956,17 @@ class App:
                      "Several alternatives: comma-separate them.")
         _ghost(de_, v_d, "d")
         self._lbl(r3, text="(the C / D tag; optional)", foreground="#888",
-                  font=(UI_FONT, 8)).pack(side="left")
+                  font=self._F(-1)).pack(side="left")
 
         # -- teach by example --------------------------------------------------
-        exf = ttk.LabelFrame(main, text="Teach by example  (pick a filename that "
-                                     "shows every part, then label each piece)",
-                             padding=8)
-        exf.pack(fill="x", padx=10, pady=2)
+        _cex = self._card(main)
+        _cex.pack(fill="x", padx=10, pady=2)
+        _teach_hdr = self._lf_header(_cex, "Teach by example")
+        Tooltip(_teach_hdr, "Pick a real filename that shows every part of "
+                            "your scheme, then label each piece with the "
+                            "dropdowns beneath it.")
+        _cex.set_title(_teach_hdr)
+        exf = _cex.body
         exrow = ttk.Frame(exf); exrow.pack(fill="x")
         v_ex = tk.StringVar(value=files[0] if files else "")
         excb = ttk.Combobox(exrow, textvariable=v_ex, values=files)
@@ -5495,15 +5977,20 @@ class App:
                       "piece can be labeled.")
         chipf = ttk.Frame(exf); chipf.pack(fill="x", pady=(6, 0))
         ordlbl = self._lbl(exf, text="", foreground="#888",
-                           font=(UI_FONT, 8))
+                           font=self._F(-1))
         ordlbl.pack(anchor="w", pady=(4, 0))
 
         # -- preview -----------------------------------------------------------
-        pvf = ttk.LabelFrame(main, text="Preview (whole folder)   "
-                                        "(drag the column edges to resize; "
-                                        "hover a clipped cell to read it)",
-                             padding=6)
-        pvf.pack(fill="both", expand=True, padx=10, pady=2)
+        _cpv = self._card(main, grow="both")
+        _cpv.pack(fill="both", expand=True, padx=10, pady=2)
+        _pv_hdr = self._lf_header(_cpv, "Preview")
+        Tooltip(_pv_hdr, "Every file in the input folder read with the "
+                         "current grammar. Green = understood, red = "
+                         "skipped (the note says why). Drag the column "
+                         "edges to resize; hover a clipped cell to read "
+                         "it in full.")
+        _cpv.set_title(_pv_hdr)
+        pvf = _cpv.body
         cols = ("file", "dac", "sample", "P", "role", "br", "rep", "seg",
                 "note")
         # grid layout so the tree gets BOTH scrollbars; columns keep a
@@ -5569,7 +6056,7 @@ class App:
             w.overrideredirect(True)
             w.attributes("-topmost", True)
             tk.Label(w, text=txt, bg="#333333", fg="#ffffff",
-                     font=(UI_FONT, 10), padx=8, pady=4,
+                     font=self._F(1), padx=8, pady=4,
                      wraplength=560, justify="left").pack()
             w.geometry("+%d+%d" % (e.x_root + 14, e.y_root + 12))
             celltip["win"] = w
@@ -5579,7 +6066,8 @@ class App:
         tv.bind("<Leave>", _cell_tip_hide)
         tv.bind("<ButtonPress>", _cell_tip_hide, add="+")
         tv.bind("<MouseWheel>", _cell_tip_hide, add="+")
-        brow = ttk.Frame(main, padding=(10, 2)); brow.pack(fill="x")
+        brow = ttk.Frame(main, padding=(10, 4))
+        brow.pack(side="bottom", fill="x", before=prow)
         match_lbl = self._lbl(brow, text="")
         match_lbl.pack(side="left")
         fixb = ttk.Button(brow, text="Fix selected\u2026")
@@ -5592,6 +6080,12 @@ class App:
         Tooltip(excb2, "Leave the selected file(s) out of the run entirely.")
         clrb = ttk.Button(brow, text="Clear all fixes")
         clrb.pack(side="left", padx=(4, 0))
+        gsb = ttk.Button(brow, text="Guess format")
+        gsb.pack(side="left", padx=(10, 0))
+        Tooltip(gsb, "Read the folder's filenames and propose a grammar "
+                     "automatically (separator, pressure token, channel "
+                     "keywords...). Check the preview, correct anything "
+                     "wrong, then press Use this profile.")
         Tooltip(clrb, "Forget every hand fix and exclusion for this folder.")
         okb = self._brand_button(brow, "Use this profile", None)
         okb.pack(side="right")
@@ -5693,7 +6187,7 @@ class App:
             for i, tok in enumerate(toks):
                 col = ttk.Frame(chipf)
                 col.pack(side="left", padx=2)
-                self._lbl(col, text=tok, font=("Consolas", 9, "bold")
+                self._lbl(col, text=tok, font=self._F(0, "bold", mono=True)
                           ).pack()
                 fv = tk.StringVar(value=order[i] if i < len(order)
                                   else "ignore")
@@ -5741,6 +6235,24 @@ class App:
             match_lbl.config(text="matched %d / %d files" % (ok, len(files)))
             probs = engine.validate_profile(prof)
             hint.config(text="; ".join(probs) if probs else "")
+
+        def _guess_from_files(*_a):
+            if not files:
+                messagebox.showinfo("Guess format",
+                                    "No files to learn from - pick an input "
+                                    "folder first.", parent=d)
+                return
+            prof, nm_ok = engine.guess_profile(files)
+            keep = "" if st.get("builtin") else st["profile"].get("name", "")
+            prof["name"] = keep or "guessed"
+            st["builtin"] = False
+            st["profile"] = prof
+            load_vars()
+            _set_editor_state()
+            rebuild_chips()
+            refresh_preview()
+            self._toast("Guessed: matched %d / %d" % (nm_ok, len(files)))
+        gsb.configure(command=_guess_from_files)
 
         def on_pick_profile(*_a):
             sel = pvar.get()
@@ -5917,6 +6429,10 @@ class App:
         self._logline("Output subfolder: " + dest)
         self._push_recent("in", in_dir)
         self._push_recent("out", out_dir)
+        try:
+            self._last_scan = (in_dir, set(os.listdir(in_dir)))
+        except OSError:
+            self._last_scan = None
         self.run_btn.config(text="Cancel", command=self._cancel_run)
         self._set_run_state("Working\u2026", "#c08000")
         self.run_prog.config(mode="determinate", value=0, maximum=100)
@@ -6052,6 +6568,17 @@ class App:
         if not results:
             results = []
         results.sort(key=lambda r: r["pressure_val"])
+        self._sel_trace = None
+        nflag = 0
+        for r in results:
+            try:
+                r["health"] = engine.health_flags(r)
+            except Exception:
+                r["health"] = []
+            nflag += 1 if r["health"] else 0
+        if nflag:
+            self._logline("%d point(s) flagged by quick quality checks "
+                          "(hover the colored dot in Traces)." % nflag)
         self.results = results
         self._skipped_count = len(skipped) if skipped else 0
         if self._skipped_count:
@@ -6150,6 +6677,15 @@ class App:
             dv = tk.BooleanVar(value=d_default); self.dvars[r["label"]] = dv
             txt = "%.2f GPa%s" % (r["pressure_val"],
                                   "  (r%d)" % r["rep"] if r["rep"] > 1 else "")
+            hf = r.get("health") or []
+            if hf:
+                worst = ("bad" if any(lv == "bad" for lv, _m in hf)
+                         else "warn")
+                dot = self._lbl(row, text=chr(0x25CF),
+                                foreground=("#e15b50" if worst == "bad"
+                                            else "#c99a2e"))
+                dot.pack(side="left", padx=(0, 3))
+                Tooltip(dot, "; ".join(m for _lv, m in hf))
             scb = ttk.Checkbutton(row, text=txt, variable=show,
                                   command=self._redraw)
             scb.pack(side="left")
@@ -6163,6 +6699,178 @@ class App:
     def _set_all(self, state):
         for v in self.trace_vars.values():
             v.set(state)
+        self._redraw()
+
+    def _rescan(self):
+        """Re-run only when the input folder actually changed."""
+        in_dir = self.in_var.get().strip()
+        if not os.path.isdir(in_dir):
+            messagebox.showerror("Rescan", "Pick a valid input folder first.")
+            return
+        try:
+            cur = set(os.listdir(in_dir))
+        except OSError as exc:
+            messagebox.showerror("Rescan",
+                                 "Could not list the folder:%s%s"
+                                 % (chr(10), exc))
+            return
+        last = getattr(self, "_last_scan", None)
+        if last and last[0] == in_dir and cur == last[1]:
+            self._toast("No new files")
+            self._logline("Rescan: no new files in " + in_dir)
+            return
+        if last and last[0] == in_dir:
+            n = len(cur - last[1])
+            if n:
+                self._logline("Rescan: %d new file(s); rerunning." % n)
+        self._run()
+
+    def _wire_legend_picks(self, leg):
+        """Legend entries are clickable: a key or its text hides / shows
+        that trace (same as its checkbox in Traces)."""
+        self._legend_artists = {}
+        if leg is None:
+            return
+        try:
+            handles = list(getattr(leg, "legend_handles", None)
+                           or leg.legendHandles)
+        except Exception:
+            handles = []
+        texts = list(leg.get_texts())
+        labs = [t.get_text() for t in texts]
+        for i, t in enumerate(texts):
+            try:
+                t.set_picker(True)
+                self._legend_artists[t] = labs[i]
+            except Exception:
+                pass
+        for i, h in enumerate(handles):
+            if i < len(labs):
+                try:
+                    h.set_picker(5)
+                    self._legend_artists[h] = labs[i]
+                except Exception:
+                    pass
+
+    def _on_pick(self, event):
+        art = event.artist
+        disp = getattr(self, "_legend_artists", {}).get(art)
+        if disp is not None:
+            lab = getattr(self, "_legend_map", {}).get(disp)
+            if lab and lab in self.trace_vars:
+                self.trace_vars[lab].set(not self.trace_vars[lab].get())
+                self._redraw()
+            return
+        lab = getattr(self, "_pick_map", {}).get(art)
+        if not lab:
+            return
+        if getattr(event.mouseevent, "button", 1) == 3:
+            self._sel_trace = lab
+            self._redraw()
+            self._trace_menu(lab, event.mouseevent)
+            return
+        if event.mouseevent.dblclick:
+            self._solo_via_canvas(lab)
+            return
+        self._sel_trace = (None if getattr(self, "_sel_trace", None) == lab
+                           else lab)
+        if self._sel_trace:
+            self._toast("Selected " + self._disp_of(lab))
+        self._redraw()
+
+    def _trace_menu(self, lab, me):
+        """Right-click menu on a curve: quick actions for that trace. Every
+        pick drives the matching right-panel control, so the panels stay
+        in sync with what the menu did."""
+        m = tk.Menu(self.root, tearoff=0)
+        m.add_command(label=self._disp_of(lab), state="disabled")
+        m.add_separator()
+        m.add_command(label="Inspect this pressure",
+                      command=lambda: self._menu_inspect(lab))
+        m.add_command(label="Solo this trace",
+                      command=lambda: self._solo_via_canvas(lab))
+        m.add_command(label="Hide this trace",
+                      command=lambda: self._menu_hide(lab))
+        m.add_command(label="Toggle decompression (D)",
+                      command=lambda: self._menu_toggle_d(lab))
+        m.add_command(label="Defringe compare here",
+                      command=lambda: self._menu_compare(lab))
+        m.add_command(label="Show in data table",
+                      command=lambda: self._toggle_drawer(True))
+        m.add_separator()
+        m.add_command(label="Deselect", command=self._menu_deselect)
+        ge = getattr(me, "guiEvent", None)
+        x = getattr(ge, "x_root", None)
+        y = getattr(ge, "y_root", None)
+        if x is None or y is None:
+            x = self.root.winfo_pointerx()
+            y = self.root.winfo_pointery()
+        try:
+            m.tk_popup(int(x), int(y))
+        finally:
+            m.grab_release()
+
+    def _menu_inspect(self, lab):
+        try:
+            idx = next(i for i, r in enumerate(self.results)
+                       if r["label"] == lab)
+            vals = list(self.inspect_combo.cget("values"))
+            if 0 <= idx < len(vals):
+                self.inspect_p.set(vals[idx])
+        except (StopIteration, tk.TclError, AttributeError):
+            pass
+        self.mode.set("inspect")
+        self._redraw()
+
+    def _menu_hide(self, lab):
+        if lab in self.trace_vars:
+            self.trace_vars[lab].set(False)
+        if getattr(self, "_sel_trace", None) == lab:
+            self._sel_trace = None
+        self._redraw()
+
+    def _menu_toggle_d(self, lab):
+        if lab in self.dvars:
+            self.dvars[lab].set(not self.dvars[lab].get())
+            self._redraw()
+
+    def _menu_compare(self, lab):
+        self._sel_trace = lab
+        try:
+            self.df_compare.set(True)
+            if not self.show_notch.get():
+                self.show_notch.set(True)
+                self._toggle_notch()
+                return              # _toggle_notch redraws when done
+        except tk.TclError:
+            pass
+        self._redraw()
+
+    def _menu_deselect(self):
+        self._sel_trace = None
+        self._redraw()
+
+    def _disp_of(self, lab):
+        for r in self.results:
+            if r["label"] == lab:
+                return "%.2f GPa" % r["pressure_val"]
+        return lab
+
+    def _solo_via_canvas(self, label):
+        """Double-click a curve: show only it; double-click again: restore
+        what was shown before."""
+        if label not in self.trace_vars:
+            return
+        live = {k: v.get() for k, v in self.trace_vars.items()}
+        soloed = all((k == label) == v for k, v in live.items())
+        if soloed and getattr(self, "_solo_prev", None):
+            for k, v in self.trace_vars.items():
+                v.set(self._solo_prev.get(k, True))
+            self._solo_prev = None
+        else:
+            self._solo_prev = live
+            for k, v in self.trace_vars.items():
+                v.set(k == label)
         self._redraw()
 
     def _solo_trace(self, label):
@@ -6566,12 +7274,15 @@ class App:
             if counts[labels[i]] > 1 and len(e) > 3 and e[3] is not None:
                 labels[i] += "  " + e[3]["sample"]
         handles, out, seen = [], [], set()
+        self._legend_map = {}
         for e, lbl in zip(ordered, labels):
             if lbl in seen:
                 continue
             seen.add(lbl)
             handles.append(e[0])
             out.append(lbl)
+            if len(e) > 3 and e[3] is not None and e[3].get("label"):
+                self._legend_map[lbl] = e[3]["label"]
         return handles, out
 
     def _legend_handles(self, handles):
@@ -6655,6 +7366,7 @@ class App:
             self._style_legend(leg)
 
     def _style_legend(self, leg):
+        self._wire_legend_picks(leg)
         """Theme + user-style the legend frame and text."""
         if not leg:
             return
@@ -7056,7 +7768,7 @@ class App:
             f = tk.Frame(t, bg="#333333", padx=12, pady=6)
             f.pack()
             tk.Label(f, text=text, bg="#333333", fg="#ffffff",
-                     font=(UI_FONT, 10)).pack()
+                     font=self._F(1)).pack()
             if anchor is not None and anchor.winfo_ismapped():
                 x = anchor.winfo_rootx()
                 y = anchor.winfo_rooty() - 36
@@ -7370,6 +8082,7 @@ class App:
             step = 0.0
 
         entries = []
+        self._pick_map = {}
         for rank, r in enumerate(shown):
             color = self._trace_color(r, cmap_name, shown)
             ls = self._trace_ls(r)
@@ -7384,6 +8097,17 @@ class App:
                                      lw=lw * 1.6, ls=ls)
             else:
                 line, = self.ax.plot(x, y, color=color, lw=lw, ls=ls)
+            line.set_picker(3)
+            self._pick_map[line] = r["label"]
+            if getattr(self, "_sel_trace", None) == r["label"]:
+                line.set_linewidth(line.get_linewidth() + 1.4)
+                line.set_zorder(5)
+            if (is_abs and getattr(self, "df_compare", None) is not None
+                    and self.df_compare.get() and self.show_notch.get()
+                    and r["label"] == getattr(self, "_sel_trace", None)):
+                self.ax.plot(x, np.asarray(r["absorbance"], float) + off,
+                             color="#909090", lw=max(0.8, lw * 0.9),
+                             ls="--", alpha=0.8, zorder=1.5)
             entries.append((line, r["pressure_val"], self._branch_of(r), r))
             if stacked and self.wf_label.get():
                 xs = x[np.isfinite(x)]
@@ -7703,19 +8427,42 @@ class App:
                               fontsize=int(self.title_fs.get()), color=tcol,
                               **tkw3)
 
-        if self.wf3d_clean.get():
-            pane_bg = "#2b2e36" if self.dark_mode.get() else "white"
-            pane_edge = "#4a4f59" if self.dark_mode.get() else "#cccccc"
+        pmode = (self.wf3d_panes.get()
+                 if getattr(self, "wf3d_panes", None) is not None
+                 else "white")
+        try:
+            _pal = max(0.0, min(1.0, float(self.wf3d_pane_alpha.get())))
+        except (ValueError, tk.TclError, AttributeError):
+            _pal = 1.0
+        # pane EDGES are never drawn: the box outline belongs to the Box
+        # frame system alone (a faint gray ghost box survived "none" before)
+        if pmode == "off" or _pal <= 0:
+            for pane in (self.ax.xaxis, self.ax.yaxis, self.ax.zaxis):
+                pane.pane.set_alpha(0.0)
+                pane.pane.set_edgecolor((1, 1, 1, 0))
+        else:
+            if pmode == "theme":
+                _uibg, _ufg, _fl, _pb, _pf = self._theme_palette()
+                pane_bg = _uibg
+            elif pmode == "light gray":
+                pane_bg = "#e9e9e9"
+            else:               # white (dark themes keep their dark panes)
+                pane_bg = "#2b2e36" if self.dark_mode.get() else "white"
             for pane in (self.ax.xaxis, self.ax.yaxis, self.ax.zaxis):
                 pane.pane.set_facecolor(pane_bg)
-                pane.pane.set_edgecolor(pane_edge)
-                pane.pane.set_alpha(1.0)
+                pane.pane.set_edgecolor((1, 1, 1, 0))
+                pane.pane.set_alpha(_pal)
         self._apply_grid(self.ax, is3d=True)
         # box frame: mpl3d omits edges depending on the view (Nhan's
         # missing-left-border bug). Draw them explicitly per the Box frame
         # mode: 'open front' skips the three edges meeting at the corner
         # nearest the viewer so nothing sits between you and the data.
         try:
+            for _a3 in (self.ax.xaxis, self.ax.yaxis, self.ax.zaxis):
+                try:
+                    _a3.line.set_color((1, 1, 1, 0))
+                except Exception:
+                    pass
             fmode = (self.wf3d_frame.get()
                      if getattr(self, "wf3d_frame", None) is not None
                      else "open front")
@@ -7726,8 +8473,8 @@ class App:
                 (by0, by1) = self.ax.get_ylim()
                 (bz0, bz1) = self.ax.get_zlim()
                 try:
-                    slw = float(self.spine_lw.get())
-                except (ValueError, tk.TclError):
+                    slw = float(self.wf3d_frame_lw.get())
+                except (ValueError, tk.TclError, AttributeError):
                     slw = 0.8
                 az = _m.radians(float(self.wf3d_azim.get()))
                 near = (bx1 if _m.cos(az) >= 0 else bx0,
@@ -7735,13 +8482,38 @@ class App:
                         bz1)
                 corners = [(cx, cy, cz) for cx in (bx0, bx1)
                            for cy in (by0, by1) for cz in (bz0, bz1)]
+                grp = {"floor": True, "posts": True, "top": True}
+                open_front = fmode == "open front"
+                if fmode == "floor only":
+                    grp["posts"] = grp["top"] = False
+                elif fmode == "no top":
+                    grp["top"] = False
+                elif fmode == "custom":
+                    grp["floor"] = self.wf3d_fr_floor.get()
+                    grp["posts"] = self.wf3d_fr_posts.get()
+                    grp["top"] = self.wf3d_fr_top.get()
+                    open_front = self.wf3d_fr_open.get()
+                _shade = (self.wf3d_frame_color.get()
+                          if getattr(self, "wf3d_frame_color", None)
+                          is not None else "auto")
+                fcol = {"black": "#1a1a1a", "dark gray": "#555555",
+                        "gray": "#999999", "light gray": "#cccccc",
+                        "white": "#ffffff"}.get(_shade, acol)
                 for a, b in itertools.combinations(corners, 2):
                     if sum(pa != pb for pa, pb in zip(a, b)) != 1:
                         continue
-                    if fmode == "open front" and near in (a, b):
+                    if a[2] != b[2]:
+                        g = "posts"
+                    elif a[2] == bz1:
+                        g = "top"
+                    else:
+                        g = "floor"
+                    if not grp[g]:
+                        continue
+                    if open_front and near in (a, b):
                         continue
                     self.ax.plot3D([a[0], b[0]], [a[1], b[1]],
-                                   [a[2], b[2]], color=acol, lw=slw,
+                                   [a[2], b[2]], color=fcol, lw=slw,
                                    zorder=1e4)
         except Exception:
             pass
@@ -7900,25 +8672,28 @@ class App:
     def _build_smooth_explainer(self, win):
         """Right-side reference panel: what each filter does, its parameters,
         and the gist of the math. Applied in the order listed."""
-        wrap = ttk.Frame(win, padding=(8, 6))
-        wrap.pack(side="right", fill="both", expand=True)
-        self._lbl(wrap, text="How the 5-step smoother works",
-                  font=(UI_FONT, 10, "bold")).pack(anchor="w")
+        _cw = self._card(win, grow="both")
+        _cw.pack(side="right", fill="both", expand=True, padx=(4, 8),
+                 pady=(6, 6))
+        _cw.set_title(self._lf_header(_cw, "How the 5-step smoother works"))
+        wrap = _cw.body
         self._lbl(wrap, text="Filters run top to bottom on raw absorbance. "
                   "Removed points become gaps (NaN), not zeros.",
-                  wraplength=300, foreground="#777").pack(anchor="w", pady=(0, 4))
+                  wraplength=300, foreground="#888",
+                  font=self._F(-1)).pack(anchor="w", pady=(0, 4))
         txtf = ttk.Frame(wrap); txtf.pack(fill="both", expand=True)
         tsb = ttk.Scrollbar(txtf)
         tsb.pack(side="right", fill="y")
+        _ubg, _ufg, _ufl, _upb, _upf = self._theme_palette()
         txt = tk.Text(txtf, width=44, wrap="word", yscrollcommand=tsb.set,
-                      relief="flat", padx=6, pady=4, font=(UI_FONT, 10),
-                      background="#f7f7f7" if not self.dark_mode.get() else "#23252b",
-                      foreground="#222" if not self.dark_mode.get() else "#ddd")
+                      relief="flat", padx=6, pady=4, font=self._F(1),
+                      background=_ubg, foreground=_ufg,
+                      insertbackground=_ufg)
         txt.pack(side="left", fill="both", expand=True)
         tsb.config(command=txt.yview)
-        txt.tag_configure("h", font=(UI_FONT, 10, "bold"),
+        txt.tag_configure("h", font=self._F(1, "bold"),
                           spacing1=8, spacing3=2)
-        txt.tag_configure("m", font=("Consolas", 9), foreground="#1a6")
+        txt.tag_configure("m", font=self._F(0, mono=True), foreground="#1a6")
         secs = [
             ("1. Saturation cutoff",
              "Detector readings above a ceiling are unreliable (the path is "
@@ -7973,7 +8748,8 @@ class App:
     def _open_smooth_panel(self):
         win = tk.Toplevel(self.root)
         win.title("Smoothing settings (Igor 5-step)")
-        win.geometry("820x640"); win.minsize(560, 380)
+        win.geometry("880x680"); win.minsize(640, 420)
+        self._apply_titlebar(win)
         p = self.smooth_params
         orig = dict(self.smooth_params)        # snapshot for Cancel / live revert
         vars_ = {}
@@ -7981,7 +8757,9 @@ class App:
         # right-side explainer panel (what each filter does + the math)
         self._build_smooth_explainer(win)
         left = ttk.Frame(win); left.pack(side="left", fill="y")
-        canv = tk.Canvas(left, highlightthickness=0, width=380)
+        canv = tk.Canvas(left, highlightthickness=0,
+                         width=self._em() * 54,
+                         background=self._theme_palette()[0])
         sb = tk.Scrollbar(left, orient="vertical", command=canv.yview, width=14)
         body = ttk.Frame(canv)
         body.bind("<Configure>",
@@ -8022,8 +8800,10 @@ class App:
                                 ("num", "jump_buff", "Buffer (pts)")]),
         ]
         for title, fields in groups:
-            fr = ttk.LabelFrame(body, text=title, padding=6)
-            fr.pack(fill="x", padx=8, pady=4)
+            _cs = self._card(body)
+            _cs.pack(fill="x", padx=8, pady=4)
+            _cs.set_title(self._lf_header(_cs, title))
+            fr = _cs.body
             for kind, key, text in fields:
                 (chk if kind == "chk" else num)(fr, key, text)
 
@@ -8125,6 +8905,16 @@ class App:
             "wf3d_clip99": self.wf3d_clip99,
             "wf3d_frame": self.wf3d_frame,
             "wf3d_clean": self.wf3d_clean,
+            "wf3d_panes": self.wf3d_panes,
+            "wf3d_frame_color": self.wf3d_frame_color,
+            "wf3d_fr_floor": self.wf3d_fr_floor,
+            "wf3d_fr_posts": self.wf3d_fr_posts,
+            "wf3d_fr_top": self.wf3d_fr_top,
+            "wf3d_fr_open": self.wf3d_fr_open,
+            "plot_theme_bg": self.plot_theme_bg,
+            "df_compare": self.df_compare,
+            "wf3d_pane_alpha": self.wf3d_pane_alpha,
+            "wf3d_frame_lw": self.wf3d_frame_lw,
             "wf3d_look": self.wf3d_look, "wf3d_color_traces": self.wf3d_color_traces,
             "wf3d_lw": self.wf3d_lw, "wf3d_project": self.wf3d_project,
             "lblpad3d_x": self.lblpad3d_x, "lblpad3d_y": self.lblpad3d_y,
@@ -8302,31 +9092,29 @@ class App:
 
     def _about(self):
         win = tk.Toplevel(self.root)
-        win.title("About / Help"); win.geometry("600x600")
+        win.title("About / Help"); win.geometry("620x620")
         self._apply_titlebar(win)
-        hdr = ttk.Frame(win, padding=(12, 10, 12, 4)); hdr.pack(fill="x")
         ic = getattr(self, "_icons", {})
+        bb = ttk.Frame(win, padding=(12, 4, 12, 10))
+        bb.pack(side="bottom", fill="x")
+        ttk.Button(bb, text="Close", command=win.destroy).pack(side="right")
+        ghb = ttk.Button(bb, text="GitHub", command=lambda: __import__(
+            "webbrowser").open(
+            "https://github.com/NoisySnooper/Beamline-DAC-Data-Tool"))
+        ghb.pack(side="right", padx=(0, 6))
+        Tooltip(ghb, "Open the project repository in your browser.")
+        hdr = ttk.Frame(win, padding=(12, 10, 12, 4)); hdr.pack(fill="x")
         if ic.get("mark_lg") is not None:
             tk.Label(hdr, image=ic["mark_lg"], bd=0).pack(side="left",
                                                           padx=(0, 12))
         hcol = ttk.Frame(hdr); hcol.pack(side="left")
         wrow = ttk.Frame(hcol); wrow.pack(anchor="w")
         self._lbl(wrow, text=BRAND["wordmark"],
-                  font=(UI_FONT_SEMI, 16)).pack(side="left")
-        self._lbl(wrow, text=BRAND["dot"], font=(UI_FONT_SEMI, 16, "bold"),
+                  font=self._F(12, semi=True)).pack(side="left")
+        self._lbl(wrow, text=BRAND["dot"], font=self._F(12, "bold", semi=True),
                   foreground=self._brand()["ac2"]).pack(side="left")
         self._lbl(hcol, text=BRAND["expansion"],
-                  font=(UI_FONT, 10), foreground="#888").pack(anchor="w")
-        self._lbl(hcol, text="%s  -  NSLS-II 22-IR-1  -  Dr. Lee's Lab"
-                  % APP_VERSION, font=(UI_FONT, 10),
-                  foreground="#888").pack(anchor="w")
-        self._lbl(hcol, text="Nhan Q. Ta  -  FFT defringe by Matthew Diamond",
-                  font=(UI_FONT, 10), foreground="#888").pack(anchor="w")
-        ghb = ttk.Button(hdr, text="GitHub", command=lambda: __import__(
-            "webbrowser").open(
-            "https://github.com/NoisySnooper/Beamline-DAC-Data-Tool"))
-        ghb.pack(side="right")
-        Tooltip(ghb, "Open the project repository in your browser.")
+                  font=self._F(1), foreground="#888").pack(anchor="w")
         strip = tk.Canvas(win, height=4, highlightthickness=0, bd=0)
         strip.pack(fill="x", padx=12, pady=(2, 6))
 
@@ -8340,12 +9128,14 @@ class App:
                 strip.create_rectangle(i * seg, 0, (i + 1) * seg, 4,
                                        fill=c, outline=c)
         strip.bind("<Configure>", _paint_strip)
-        txt = tk.Text(win, wrap="word", font=(UI_FONT, 10),
+        txt = tk.Text(win, wrap="word", font=self._F(1),
                       padx=10, pady=10)
         txt.pack(fill="both", expand=True)
         body = (
             "%s  (%s)\n" % (BRAND["name"], BRAND["org"])
-            + APP_VERSION + "\n\n"
+            + APP_VERSION + "\n"
+            "Nhan Q. Ta  -  FFT defringe by Matthew Diamond\n"
+            "NSLS-II 22-IR-1  -  Dr. Lee's Lab\n\n"
             "Built for Dr. Lee's lab to concatenate DAC absorption segments, "
             "compute absorbance, and plot (2D overlay / stacked, 3D ridge).\n\n"
             "ABSORBANCE\n"
@@ -8368,7 +9158,6 @@ class App:
             "  - Save / Load session keeps folders + every plotting setting.\n"
             "  - [ and ] cycle the colormap; right-click a slider resets it.\n")
         txt.insert("1.0", body); txt.configure(state="disabled")
-        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
 
     def _peak_readout(self):
         if not self.results:

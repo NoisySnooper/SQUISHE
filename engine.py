@@ -355,6 +355,192 @@ def apply_override(rec, ov):
     return base
 
 
+
+def health_flags(result, sat_ceiling=4.0):
+    """Quick quality checks for one reduced point. Returns a list of
+    (level, message), level 'warn' or 'bad'. Cheap (numpy only) and
+    conservative: it flags things worth a second look at the beamline,
+    it does not judge the science."""
+    flags = []
+    a = np.asarray(result.get("absorbance"), float)
+    fin = np.isfinite(a)
+    if a.size == 0 or not fin.any():
+        chans = [nm for nm, key in (("sample", "samp_c"),
+                                    ("background", "bg_c"),
+                                    ("dark", "dark_c"))
+                 if np.isfinite(np.asarray(result.get(key), float)).any()]
+        flags.append(("bad", "no absorbance (raw channels: %s)"
+                      % (", ".join(chans) or "none")))
+        return flags
+    vals = a[fin]
+    n = vals.size
+    sat = int((vals >= sat_ceiling).sum())
+    if sat > max(3, 0.01 * n):
+        flags.append(("warn", "%d point(s) at A >= %g: likely saturated or "
+                      "blocked beam" % (sat, sat_ceiling)))
+    neg = int((vals < -0.05).sum())
+    if neg > 0.05 * n:
+        flags.append(("warn", "negative absorbance over %d point(s): check "
+                      "channel pairing / lamp drift" % neg))
+    return flags
+
+
+def guess_profile(fnames, name="guessed"):
+    """Infer a naming profile from real filenames (the Name-format dialog's
+    Guess button). Heuristic: choose the separator that tokenizes most
+    consistently, take a shared literal first token as the prefix, then
+    classify each token position (pressure / channel role / branch /
+    retake); the first two unclaimed positions become cell and sample.
+    Returns (profile, n_matched). The live preview is the real check."""
+    ROLE_WORDS = {"bg": "background", "ref": "background",
+                  "back": "background", "background": "background",
+                  "s": "sample", "sam": "sample", "samp": "sample",
+                  "sample": "sample", "sig": "sample",
+                  "dark": "dark", "dk": "dark", "drk": "dark"}
+    BRANCH_WORDS = {"c": "C", "comp": "C", "up": "C",
+                    "d": "D", "dec": "D", "decomp": "D", "down": "D"}
+    bases = []
+    for f in fnames:
+        n0 = f[:-4] if f.lower().endswith(".csv") else f
+        if "." in n0:
+            b, ext = n0.rsplit(".", 1)
+            if ext.isdigit():
+                n0 = b
+            elif ext.isalpha() and len(ext) <= 4 and "." not in b:
+                n0 = b          # a plain data extension (.txt, .dat, .asc)
+        if n0:
+            bases.append(n0)
+    if not bases:
+        return default_profile(name), 0
+    best_sep, best_score = "_", -1.0
+    for sep in ("_", "-", " ", "+"):
+        counts = [len([t for t in b.split(sep) if t]) for b in bases]
+        multi = sum(1 for c in counts if c >= 2) / float(len(counts))
+        if multi == 0:
+            continue
+        avg = sum(counts) / float(len(counts))
+        var = sum((c - avg) ** 2 for c in counts) / float(len(counts))
+        score = multi * 3.0 - var * 0.2 + avg * 0.05
+        if score > best_score:
+            best_sep, best_score = sep, score
+    sep = best_sep
+    toks = [[t for t in b.split(sep) if t] for b in bases]
+    toks = [t for t in toks if t]
+    if not toks:
+        return default_profile(name), 0
+    first = {}
+    for t in toks:
+        k = t[0].lower()
+        first[k] = first.get(k, 0) + 1
+    pfx, pn = max(first.items(), key=lambda kv: kv[1])
+    prefix = ""
+    if pn >= 0.8 * len(toks) and not pfx[0].isdigit() and len(first) <= 2:
+        prefix = pfx
+        toks = [t[1:] if t and t[0].lower() == pfx else t for t in toks]
+        toks = [t for t in toks if t]
+        if not toks:
+            return default_profile(name), 0
+    ncol = max(len(t) for t in toks)
+    if ncol < 2:
+        return default_profile(name), 0
+
+    def col(i):
+        return [t[i] for t in toks if len(t) > i]
+
+    press_col, press_frac, press_dec = None, 0.0, "p"
+    for i in range(ncol):
+        vals = col(i)
+        hits, dec_hits = 0, {"p": 0, ".": 0, ",": 0}
+        marked = 0
+        for v in vals:
+            for dec in ("p", ".", ","):
+                ps, _pv = _parse_pressure_token(v, dec, ["gpa", "kbar"])
+                if ps is not None:
+                    hits += 1
+                    dec_hits[dec] += 1
+                    if not v.isdigit():
+                        marked += 1
+                    break
+        frac = hits / float(len(vals) or 1)
+        if hits and not marked:
+            frac *= 0.5     # bare integers alone are a weak pressure signal
+        if frac > max(press_frac, 0.45):
+            press_col, press_frac = i, frac
+            press_dec = max(dec_hits.items(), key=lambda kv: kv[1])[0]
+    role_col, role_frac = None, 0.0
+    for i in range(ncol):
+        if i == press_col:
+            continue
+        vals = [v.lower() for v in col(i)]
+        hits = sum(1 for v in vals if v in ROLE_WORDS)
+        frac = hits / float(len(vals) or 1)
+        if hits >= 2 and frac > role_frac:
+            role_col, role_frac = i, frac
+    branch_col = None
+    for i in range(ncol):
+        if i in (press_col, role_col):
+            continue
+        vals = [v.lower() for v in col(i)]
+        hits = sum(1 for v in vals if v in BRANCH_WORDS)
+        if hits and hits >= 0.5 * len(vals):
+            branch_col = i
+            break
+    rep_col = None
+    for i in range(ncol - 1, 1, -1):
+        if i in (press_col, role_col, branch_col):
+            continue
+        vals = col(i)
+        if vals and all(v.isdigit() and len(v) <= 2 for v in vals):
+            rep_col = i
+            break
+    ids = [i for i in range(ncol)
+           if i not in (press_col, role_col, branch_col, rep_col)]
+    if len(ids) < 2:
+        return default_profile(name), 0
+    dac_col, sample_col = ids[0], ids[1]
+    order = []
+    for i in range(ncol):
+        if i == dac_col:
+            order.append("dac")
+        elif i == sample_col:
+            order.append("sample")
+        elif i == press_col:
+            order.append("pressure")
+        elif i == role_col:
+            order.append("role")
+        elif i == branch_col:
+            order.append("branch")
+        elif i == rep_col:
+            order.append("rep")
+        else:
+            order.append("ignore")
+    role_map = {"": "dark"}
+    if role_col is not None:
+        for v in {v.lower() for v in col(role_col)}:
+            if v in ROLE_WORDS:
+                role_map[v] = ROLE_WORDS[v]
+    if branch_col is not None:
+        branch_tokens = {v.lower(): BRANCH_WORDS[v.lower()]
+                         for v in set(col(branch_col))
+                         if v.lower() in BRANCH_WORDS}
+    else:
+        branch_tokens = {"c": "C", "d": "D"}
+    prof = {
+        "name": name, "prefix": prefix, "sep": sep, "order": order,
+        "pressure_decimal": press_dec,
+        "pressure_unit_strip": ["gpa", "kbar"],
+        "role_map": role_map,
+        "branch_tokens": branch_tokens,
+        "seq_sep": ".", "seq_missing": 1,
+        "defaults": {"pressure": 0.0, "role": "dark", "rep": 1},
+    }
+    if validate_profile(prof):
+        return default_profile(name), 0
+    matched = sum(1 for f in fnames
+                  if not parse_with_profile(f, prof).get("skip"))
+    return prof, matched
+
+
 # ---------------------------------------------------------------------------
 # Spectrum file reader
 # ---------------------------------------------------------------------------

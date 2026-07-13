@@ -13,7 +13,11 @@ independently toggleable; the split Savitzky-Golay always runs):
 Split decision uses WAVELENGTH (nm) regardless of the display axis, matching the
 Igor intent (the 600 nm boundary separates two grating/detector regimes).
 
-Defaults below are copied verbatim from DACSmooth_InitParams in the .ipf.
+Defaults: steps 1-3 and 5 are copied verbatim from DACSmooth_InitParams
+in the .ipf. The Savitzky-Golay windows were retuned on the June 2026
+22-IR-1 campaign (5360-point spectra): 201/101 -> 101/51 keeps ~97% of the
+noise suppression at roughly a third of the absorption-edge distortion
+(max deviation 0.021 vs 0.057 A against an 11-pt median reference).
 
 NQT / Lee Lab -- Jun 2026
 """
@@ -22,14 +26,15 @@ import numpy as np
 from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 
-# Verbatim from Igor DACSmooth_InitParams()
+# Steps 1-3, 5 verbatim from Igor DACSmooth_InitParams(); SG windows
+# retuned for the 22-IR-1 spectrometer (see module docstring)
 DEFAULTS = {
     "cutoff_on": True,  "cutoff_val": 4.0,
     "density_on": True, "density_win": 50, "density_min": 10,
     "hampel_on": True,  "hampel_win": 5,  "hampel_sig": 3.0,
     "split_nm": 600.0,
-    "left_win": 201, "left_poly": 2,
-    "right_win": 101, "right_poly": 2,
+    "left_win": 101, "left_poly": 2,
+    "right_win": 51, "right_poly": 2,
     "jump_on": True, "jump_thresh": 0.2, "jump_step": 1, "jump_buff": 2,
 }
 

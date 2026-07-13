@@ -44,6 +44,32 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   icon set, themed title bar, eight themes including true-black and paper,
   and an adjustable interface text size.
 
+## New in v1.4.3
+
+- **Work the plot directly**: click a curve to select it, double-click to
+  solo it, click a legend entry to hide it, right-click a curve for quick
+  actions (inspect that pressure, hide, mark decompression, defringe
+  compare, open the data table) that drive the matching panel controls.
+- **Guess format**: the Name format dialog can read the input folder and
+  propose the whole filename grammar automatically; correct anything wrong
+  in the live preview, then adopt it.
+- **Quality flags**: every reduced point gets quick checks (saturation,
+  missing channels, negative absorbance); flagged traces show a colored
+  dot with the reason on hover.
+- **Rescan** re-reduces only when new files appeared in the input folder
+  (the between-measurements top-up), and **defringe compare** overlays the
+  selected trace's pre-defringe curve in gray.
+- **Adaptive interface**: text size follows screen resolution and Windows
+  display scale (manual 9-15 override), DPI-proof panel widths, a flat
+  hairline-card look, and a themed-plot-background toggle.
+- **3D box & panes**: frame modes (open front, floor only, custom
+  per-edge), frame shade and width, pane color and opacity; "none" now
+  removes every edge.
+- Smoothing defaults retuned on real 22-IR-1 spectra (Savitzky-Golay
+  windows 201/101 -> 101/51: keeps ~97% of the noise suppression at a
+  third of the absorption-edge distortion; the other steps stay verbatim
+  Igor).
+
 ## Run from source
 
 ```
@@ -85,6 +111,11 @@ any unsigned exe): More info -> Run anyway.
 
 ## Version history
 
+- **v1.4.3** — clickable plot (select / solo / hide / right-click quick
+  actions); filename-grammar auto-guess; per-point quality flags; Rescan;
+  defringe compare; adaptive text size and DPI-proof layout; hairline-card
+  design; 3D box-frame and pane controls; smoothing defaults retuned for
+  22-IR-1.
 - **v1.4** — SQUISHE rebrand and visual system; multi-tab sessions; flexible
   filename ingestion; raw data table; journal presets with WYSIWYG preview;
   provenance sidecars; 2D/3D view controls; 43-test suite.

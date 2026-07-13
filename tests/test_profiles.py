@@ -6,6 +6,9 @@ parse reordered/re-separated names, and (3) per-file overrides can fix or
 resurrect anything.
 """
 import os
+
+import numpy as np
+
 import engine
 
 
@@ -155,3 +158,59 @@ def test_scan_folder_custom_profile(tmp_path):
     groups2, skipped2 = engine.scan_folder(str(d), p, ov)
     assert skipped2 == []
     assert 2 in groups2[("D42", "fo90", "1p5", None)]["meas"]["sample"]
+
+
+# ---- guess_profile (the Name-format dialog's Guess button) -----------------
+
+def test_guess_recovers_builtin_convention():
+    names = ["vis_Y04_arch29_12p5_bg.001", "vis_Y04_arch29_12p5_s.001",
+             "vis_Y04_arch29_12p5.001", "vis_Y04_arch29_26p0_bg.002",
+             "vis_Y04_arch29_26p0_s.002"]
+    prof, n = engine.guess_profile(names)
+    assert prof["prefix"] == "vis"
+    assert prof["sep"] == "_"
+    assert prof["order"][:3] == ["dac", "sample", "pressure"]
+    assert prof["role_map"].get("bg") == "background"
+    assert prof["role_map"].get("s") == "sample"
+    assert n == len(names)
+
+
+def test_guess_dash_grammar_with_units():
+    names = ["IR-Y04-arch29-12.5-bg-2.001", "IR-Y04-arch29-12.5-s-2.001",
+             "IR-Y04-arch29-12.5-2.001", "IR-Y04-arch29-26.0GPa-bg.002"]
+    prof, n = engine.guess_profile(names)
+    assert prof["sep"] == "-"
+    assert prof["prefix"] == "ir"
+    assert "pressure" in prof["order"] and "role" in prof["order"]
+    assert n == len(names)
+
+
+def test_guess_gives_up_gracefully():
+    prof, n = engine.guess_profile(["IMG0001", "IMG0002", "notes"])
+    assert n == 0    # falls back to an editable default, matching nothing
+
+
+# ---- health_flags -----------------------------------------------------------
+
+def test_health_clean_point_has_no_flags():
+    r = {"absorbance": np.linspace(0, 2, 200), "samp_c": np.ones(200),
+         "bg_c": np.ones(200), "dark_c": np.zeros(200)}
+    assert engine.health_flags(r) == []
+
+
+def test_health_raw_only_is_bad():
+    nan = np.full(50, np.nan)
+    r = {"absorbance": nan, "samp_c": nan, "bg_c": np.ones(50),
+         "dark_c": nan}
+    flags = engine.health_flags(r)
+    assert flags and flags[0][0] == "bad"
+    assert "background" in flags[0][1]
+
+
+def test_health_saturation_warns():
+    a = np.linspace(0, 2, 200)
+    a[:20] = 5.0
+    r = {"absorbance": a, "samp_c": np.ones(200), "bg_c": np.ones(200),
+         "dark_c": np.zeros(200)}
+    flags = engine.health_flags(r)
+    assert any("saturated" in m for _l, m in flags)
