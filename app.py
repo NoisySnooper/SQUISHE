@@ -64,7 +64,7 @@ FONTS = ["Jost", "Segoe UI", "DejaVu Sans", "DejaVu Serif",
 LEGEND_LOCS = ["best", "upper right", "upper left", "lower left",
                "lower right", "center right", "outside right"]
 
-APP_VERSION = "v1.4.3"
+APP_VERSION = "v1.4.4"
 APP_CODENAME = "Olivine"
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ INFO_TEXT = (
     "X-AXIS UNITS\n"
     "  wavenumber[cm^-1] = 1e7 / wavelength[nm]\n"
     "  energy[eV]        = 1239.84 / wavelength[nm]\n\n"
-    "FILENAME FORMAT\n"
+    "FILENAME FORMAT  (the built-in default)\n"
     "  vis_{DAC}_{Sample}[_{Pressure}][_bg|_s][_C|_D][_2|_3][.{seq}]\n"
     "    no suffix = dark,  _bg = background,  _s = sample\n"
     "    _C/_D = optional compression/decompression tag (auto-detects branch)\n"
@@ -148,6 +148,11 @@ INFO_TEXT = (
     "  Incomplete channel sets (e.g. bg only) load as raw counts with a\n"
     "  channel tag in the trace name; absorbance needs S + B + D.\n"
     "  Files that do not match are skipped (see the log above).\n\n"
+    "DIFFERENT NAMING SCHEME?\n"
+    "  The grammar above is only the built-in default. 'Name format'\n"
+    "  (left panel) teaches any scheme from one example file, 'Guess\n"
+    "  format' reads the folder and proposes it for you, and stubborn\n"
+    "  files can be fixed or excluded by hand (remembered per folder).\n\n"
     "BRANCHES (C / D)\n"
     "  C = compression (solid),  D = decompression (dashed).\n"
     "  Auto for known experiments and _C/_D tags; toggle D per trace otherwise.\n\n"
@@ -165,6 +170,7 @@ QUICK_START = (
     "   grating segments per measurement, computes absorbance, and writes\n"
     "   one CSV per pressure to <output>/<inputname>_absorbance/.\n"
     "3. All pressures plot automatically. Format with the right-side panels.\n"
+    "   Click a curve to select it; right-click it for quick actions.\n"
     "4. Publication figure: pick a Journal preset (Nature / Science / RSI /\n"
     "   APS / Elsevier) in the Figure box - it sets the column width AND the\n"
     "   house style (font, sizes, line weight, spines, DPI) in one pick.\n"
@@ -186,7 +192,13 @@ QUICK_START = (
 
 PANEL_GUIDE = (
     "PANEL GUIDE\n\n"
-    "NEW IN v1.4.3\n"
+    "NEW IN v1.4.3 / v1.4.4\n"
+    "  Direct labels at curves (Legend box) writes each pressure at its\n"
+    "    curve end instead of a legend box; works in 2D and 3D.\n"
+    "  Legend border opacity is separate from background opacity; up to\n"
+    "    16 legend columns.\n"
+    "  Box frame gained the classic 3 axes mode (only the x, y, z tick\n"
+    "    axes facing you); custom Edges can add them too.\n"
     "  Rescan (left panel) re-runs only if the input folder gained files\n"
     "    since the last Run: the between-measurements top-up.\n"
     "  Guess format (Name format dialog) reads the folder and proposes\n"
@@ -258,18 +270,22 @@ PANEL_GUIDE = (
     "WATERFALL\n"
     "  off - shared baseline. 2D stacked - shift each pressure up by\n"
     "    Offset/step. 3D ridge - x=wavelength, depth=pressure, height=abs.\n\n"
-    "3D RIDGE OPTIONS\n"
-    "  Even rank spacing - equal depth steps (ticks still real GPa); keeps\n"
-    "    crowded pressures legible.\n"
-    "  3D look - walls + traces, walls only, or a clean traces-only joyplot;\n"
-    "    'Color traces by colormap' colours the outlines.\n"
-    "  Stretch X/Y/Z - stretch the box along an axis for visual clarity\n"
-    "    without respacing the data (Y fans out crowded ridges).\n"
-    "  View presets + Elev/Azim/Zoom - camera. Project - faint shadows on\n"
-    "    the back wall / floor. Fill opacity - wall transparency.\n"
-    "  Z clip - blank = the full data range. 'Clip Z spikes (99th pct)'\n"
-    "    caps the auto top so saturated spikes don't blow out the scale;\n"
-    "    typed Z limits always win.\n\n"
+    "3D RIDGE OPTIONS  (sectioned: Camera / Box & panes / Ridges / Layout)\n"
+    "  Camera - Elevation / Azimuth / Zoom sliders, view presets (Iso,\n"
+    "    Front, Side, Top) and Reset; arrow keys orbit, + / - zoom,\n"
+    "    0 resets the camera.\n"
+    "  Box & panes - Box frame picks which edges draw: open front,\n"
+    "    3 axes (the classic look: just the x / y / z tick axes facing\n"
+    "    you), closed, floor only, no top, none, or custom (per-edge\n"
+    "    checkboxes; '3 axes' can be forced on top of any mix). Frame\n"
+    "    shade and Frame width style the edges. Panes sets the back-wall\n"
+    "    color (white / theme / light gray / off) with its own opacity.\n"
+    "  Ridges - 3D look (walls + traces / walls only / traces only),\n"
+    "    color traces by colormap, fill opacity, 3D line width / color /\n"
+    "    opacity, Project (faint shadows on the back wall / floor),\n"
+    "    log Z, clip Z spikes (99th pct), even rank spacing.\n"
+    "  Layout & speed - Stretch X/Y/Z fan the box out without respacing\n"
+    "    the data; label gaps per axis; 3D detail and performance mode\n\n"
     "DEFRINGE\n"
     "  Enable (FFT notch) - remove diamond-anvil interference fringes by\n"
     "    notching the dominant auto-detected fringe out of the raw Sample and\n"
@@ -277,22 +293,31 @@ PANEL_GUIDE = (
     "    15%; sliding it to 0 disables defringe, any nonzero width enables it.\n"
     "    n*t min/max and p-value max expose the detection gates (defaults\n"
     "    15-100 um, 1e-4). When enabled, Run also writes\n"
-    "    {stem}_absorbance_notch.csv files; 'Export defringed CSV' writes\n"
+    "    {stem}_absorbance_notch.csv files; the Export CSV... button writes\n"
     "    them anytime.\n\n"
     "SMOOTHING\n"
     "  Show smoothed/raw. 'Smoothing settings' exposes the 5-step filter\n"
-    "  (cutoff, density, Hampel, split Savitzky-Golay, jump) matching the\n"
-    "  established lab pipeline.\n\n"
+    "  (cutoff, density, Hampel, split Savitzky-Golay, jump) from the\n"
+    "  lab's Igor pipeline, with the Savitzky-Golay windows retuned for\n"
+    "  this spectrometer (101 / 51 points).\n\n"
     "VERTICAL MARKERS\n"
     "  Vertical lines at given wavelengths (comma-separated), e.g. an edge.\n\n"
     "TITLE / LABELS / LEGEND / COLORBAR\n"
-    "  Edit title and axis labels. Legend on/off + location ('outside right'\n"
-    "    keeps it off the data) + columns + title.\n"
-    "  Colorbar - a continuous pressure scale (labeled 'Pressure (GPa)').\n"
+    "  Edit title and axis labels (positions and gaps in the Style\n"
+    "    box). Legend on/off + location ('outside right' keeps it off\n"
+    "    the data) + up to 16 columns + title + key style (color box /\n"
+    "    line).\n"
+    "  Direct labels at curves - write each pressure at its curve end,\n"
+    "    in the trace color, instead of a legend box; works in 2D\n"
+    "    overlay, 2D stacked, and 3D ridge.\n"
+    "  Frame - border on/off, width, edge color, and separate\n"
+    "    background / border opacities (shared with the colorbar).\n"
+    "  Colorbar - a continuous pressure scale (labeled 'Pressure\n"
+    "    (GPa)').\n"
     "  'Auto: colorbar for many traces' (off by default) - when on, a\n"
-    "    continuous colormap with >10 traces uses a colorbar instead of a\n"
-    "    large legend that would hide the data. A categorical colormap always\n"
-    "    keeps a discrete legend.\n\n"
+    "    continuous colormap with >10 traces uses a colorbar instead of\n"
+    "    a large legend that would hide the data. A categorical colormap\n"
+    "    always keeps a discrete legend.\n\n"
     "FIGURE  (journal presets + export)\n"
     "  Journal preset - sets column width AND house style in one pick:\n"
     "    Nature 89/183 mm and Science 5.7/12.1/18.4 cm (sans-serif), RSI/AIP\n"
@@ -308,8 +333,8 @@ PANEL_GUIDE = (
     "  Save the whole control state under a name; reload from the dropdown.\n\n"
     "EXPORT\n"
     "  Save plot (PNG/PDF/SVG/EPS/TIFF; vector embeds fonts). Batch PNG =\n"
-    "  one image per shown trace. Export smoothed CSV = wl/cm^-1/eV + raw +\n"
-    "  smoothed columns."
+    "  one image per shown trace. Export CSV... = smoothed (wl / cm^-1 /\n"
+    "  eV + raw + smoothed columns) or defringed CSVs."
 )
 
 SHORTCUTS_TEXT = (
@@ -322,6 +347,7 @@ SHORTCUTS_TEXT = (
     "Click curve    Select it (highlight; defringe-compare target)\n"
     "Dbl-click      Solo that curve (again = restore)\n"
     "Click legend   Hide / show that trace\n"
+    "R-click curve  Quick-actions menu (inspect, solo, D, compare...)\n"
     "Ctrl+T         New tab (blank session)\n"
     "Ctrl+W         Close the current tab\n"
     "Ctrl+Tab       Next tab  (Ctrl+Shift+Tab = previous)\n"
@@ -2413,12 +2439,10 @@ class App:
         hdr0 = ttk.Frame(p)
         hdr0.pack(fill="x", pady=(0, 4))
         self._lbl(hdr0, text="Data Input", font=self._F(2, "bold")).pack(
-            side="left")
+            side="left", anchor="s")
         self.run_state = self._lbl(hdr0, text="Ready", foreground="#2a8a4a",
                                    font=self._F(1, "bold"))
-        self.run_state.pack(side="right")
-        Tooltip(self.run_state, "Reduction status: Ready, Working, or how "
-                                "many traces the last Run produced.")
+        self.run_state.pack(side="right", anchor="s", pady=(0, 1))
 
         _cin = self._card(p)
         _cin.pack(fill="x", pady=(2, 4))
@@ -4342,7 +4366,7 @@ class App:
         Tooltip(nwsc, "Gaussian-notch half-width as a percent of the fringe "
                       "frequency (default 15%). Wider removes more around the "
                       "fringe. Slide to 0 to disable defringe; any nonzero "
-                      "width enables it. Right-click resets.")
+                      "width enables it.")
         # Width changes invalidate caches and drive the Enable box (0 = off).
         self.notch_width.trace_add("write", self._on_notch_width)
         # detection parameters (defaults = Matthew's defringe_dac.py constants)
@@ -4582,10 +4606,19 @@ class App:
         Tooltip(swc, "Legend key style. 'color box' shows a thick color "
                      "block per trace (easy to read, matches the 3D legend); "
                      "'line' shows the artist itself (thin line).")
+        self.legend_direct = tk.BooleanVar(value=False)
+        ldc = ttk.Checkbutton(lg, text="Direct labels at curves (no box)",
+                              variable=self.legend_direct,
+                              command=self._redraw)
+        ldc.pack(anchor="w", pady=(2, 1))
+        Tooltip(ldc, "Label every curve at its right end with its pressure, "
+                     "colored like the trace, instead of a legend box. Works "
+                     "in 2D overlay, 2D stacked, and 3D ridge; uses the "
+                     "legend font size.")
         lr2 = ttk.Frame(lg); lr2.pack(fill="x", pady=(4, 1))
         self._lbl(lr2, text="Columns", width=9).pack(side="left")
         self.legend_cols = tk.IntVar(value=2)
-        ttk.Spinbox(lr2, from_=1, to=6, textvariable=self.legend_cols, width=4,
+        ttk.Spinbox(lr2, from_=1, to=16, textvariable=self.legend_cols, width=4,
                     command=self._redraw).pack(side="left")
         self._lbl(lr2, text="Font size").pack(side="left", padx=(14, 0))
         self.legend_fs = tk.IntVar(value=9)
@@ -4620,6 +4653,12 @@ class App:
         lwsc2, _lwe2 = self._slider_row(lg, "Border width", self.legend_bw,
                             0.0, 3.0, "%.2f")
         Tooltip(lwsc2, "Thickness of the legend / colorbar border.")
+        self.legend_edge_alpha = tk.DoubleVar(value=1.0)
+        leasc, _lea = self._slider_row(lg, "Border opacity",
+                                       self.legend_edge_alpha, 0.0, 1.0,
+                                       "%.2f")
+        Tooltip(leasc, "Opacity of the legend / colorbar border, independent "
+                       "of the background opacity.")
         lcr = ttk.Frame(lg); lcr.pack(fill="x", pady=(4, 1))
         self._lbl(lcr, text="Edge color", width=10).pack(side="left")
         self.legend_edge = tk.StringVar(value="auto")
@@ -5045,16 +5084,18 @@ class App:
         _sec("Box & panes")
         bfr = ttk.Frame(td); bfr.pack(fill="x", pady=(2, 1))
         self._lbl(bfr, text="Box frame", width=11).pack(side="left")
-        self.wf3d_frame = tk.StringVar(value="open front")
+        self.wf3d_frame = tk.StringVar(value="3 axes")
         bfc = ttk.Combobox(bfr, textvariable=self.wf3d_frame,
                            state="readonly", width=11,
-                           values=["open front", "closed", "floor only",
-                                   "no top", "none", "custom"])
+                           values=["open front", "3 axes", "closed",
+                                   "floor only", "no top", "none",
+                                   "custom"])
         bfc.pack(side="left")
-        Tooltip(bfc, "Which box edges are drawn. 'open front' keeps the "
-                     "corner facing you open (nothing between you and the "
-                     "data); 'closed' draws all 12 edges; 'floor only' and "
-                     "'no top' are lighter looks; 'custom' unlocks the "
+        Tooltip(bfc, "Which box edges are drawn. '3 axes' is the "
+                     "classic matplotlib look: only the x, y, and z tick "
+                     "axes facing you. 'open front' keeps the corner facing "
+                     "you open; 'closed' draws all 12 edges; 'floor only' "
+                     "and 'no top' are lighter looks; 'custom' unlocks the "
                      "Edges checkboxes below; 'none' removes every edge.")
         shr = ttk.Frame(td); shr.pack(fill="x", pady=(2, 1))
         self._lbl(shr, text="Frame shade", width=11).pack(side="left")
@@ -5071,10 +5112,14 @@ class App:
         self.wf3d_fr_posts = tk.BooleanVar(value=True)
         self.wf3d_fr_top = tk.BooleanVar(value=True)
         self.wf3d_fr_open = tk.BooleanVar(value=True)
+        self.wf3d_fr_axes = tk.BooleanVar(value=False)
         cer = ttk.Frame(td); cer.pack(fill="x", pady=(0, 1))
         self._lbl(cer, text="Edges", width=11).pack(side="left")
         self._fr_checks = []
         for _txt, _var, _tip in (
+                ("3 axes", self.wf3d_fr_axes,
+                 "Always include the x, y, and z tick axes facing you "
+                 "(the classic matplotlib frame)."),
                 ("floor", self.wf3d_fr_floor, "The 4 bottom edges."),
                 ("posts", self.wf3d_fr_posts, "The 4 vertical edges."),
                 ("top", self.wf3d_fr_top, "The 4 top-rim edges."),
@@ -5216,15 +5261,14 @@ class App:
         ssx, _ssx = self._slider_row(td, "Stretch X", self.wf3d_sx,
                                      0.3, 6.0, "%.2f")
         Tooltip(ssx, "Stretch the 3D box along the spectral (wavelength) "
-                     "axis without respacing the data. Right-click resets.")
+                     "axis without respacing the data.")
         ssy, _ssy = self._slider_row(td, "Stretch Y", self.wf3d_sy,
                                      0.3, 6.0, "%.2f")
         Tooltip(ssy, "Stretch the pressure axis to fan out crowded ridges "
-                     "without respacing the data. Right-click resets.")
+                     "without respacing the data.")
         ssz, _ssz = self._slider_row(td, "Stretch Z", self.wf3d_sz,
                                      0.3, 6.0, "%.2f")
-        Tooltip(ssz, "Stretch the height (absorbance) axis. Right-click "
-                     "resets.")
+        Tooltip(ssz, "Stretch the height (absorbance) axis.")
         ttk.Button(td, text="Reset stretch", width=14,
                    command=self._reset_stretch).pack(anchor="w", pady=(0, 2))
         self.lblpad3d_x = tk.DoubleVar(value=15.0)
@@ -7348,6 +7392,11 @@ class App:
                               "off 'Auto: colorbar for many traces', or use a "
                               "categorical colormap, for a discrete legend."
                               % len(entries))
+        elif (getattr(self, "legend_direct", None) is not None
+              and self.legend_direct.get() and entries):
+            if not (self.wf_mode.get() == "2D stacked"
+                    and self.wf_label.get()):
+                self._direct_labels_2d(entries)
         elif self.legend_on.get() and entries:
             h, l = self._ordered_legend(entries)
             h = self._legend_handles(h)
@@ -7365,6 +7414,44 @@ class App:
                 leg = self.ax.legend(h, l, loc=loc, **kw)
             self._style_legend(leg)
 
+    def _direct_labels_2d(self, entries):
+        """Label each curve at its right end with its pressure (legend
+        alternative). Labels are nudged apart vertically so close
+        pressures stay readable."""
+        try:
+            fs = int(self.legend_fs.get())
+        except (ValueError, tk.TclError):
+            fs = 9
+        items = []
+        for e in entries:
+            line, pv = e[0], e[1]
+            try:
+                xd = np.asarray(line.get_xdata(), float)
+                yd = np.asarray(line.get_ydata(), float)
+            except Exception:
+                continue
+            f = np.isfinite(xd) & np.isfinite(yd)
+            if not f.any():
+                continue
+            i = np.where(f)[0][-1]
+            items.append([float(xd[i]), float(yd[i]), "%.2f" % pv,
+                          line.get_color()])
+        if not items:
+            return
+        try:
+            y0, y1 = self.ax.get_ylim()
+            minsep = abs(y1 - y0) * 0.024 * fs / 9.0
+            items.sort(key=lambda t: t[1])
+            for k in range(1, len(items)):
+                if items[k][1] - items[k - 1][1] < minsep:
+                    items[k][1] = items[k - 1][1] + minsep
+        except Exception:
+            pass
+        for x, y, txt, col in items:
+            self.ax.annotate(txt, (x, y), xytext=(4, 0),
+                             textcoords="offset points", fontsize=fs,
+                             color=col, va="center", clip_on=False)
+
     def _style_legend(self, leg):
         self._wire_legend_picks(leg)
         """Theme + user-style the legend frame and text."""
@@ -7374,11 +7461,20 @@ class App:
         tcol = self._axis_text_colors(pf)[1]
         edge = self.legend_edge.get()
         edge = tcol if edge == "auto" else edge
+        from matplotlib.colors import to_rgba as _t_rgba
         fr = leg.get_frame()
-        fr.set_facecolor(pb)
-        fr.set_alpha(float(self.legend_alpha.get()))
+        try:
+            _ba = max(0.0, min(1.0, float(self.legend_alpha.get())))
+        except (ValueError, tk.TclError):
+            _ba = 0.92
+        fr.set_facecolor(_t_rgba(pb, _ba))
+        fr.set_alpha(None)          # keep face / edge alphas independent
         if self.legend_border.get():
-            fr.set_edgecolor(edge)
+            try:
+                _ea = max(0.0, min(1.0, float(self.legend_edge_alpha.get())))
+            except (ValueError, tk.TclError, AttributeError):
+                _ea = 1.0
+            fr.set_edgecolor(_t_rgba(edge, _ea))
             fr.set_linewidth(float(self.legend_bw.get()))
         else:
             fr.set_edgecolor("none"); fr.set_linewidth(0)
@@ -7421,7 +7517,7 @@ class App:
                 from matplotlib.ticker import MaxNLocator
                 cb.locator = MaxNLocator(n)
                 cb.update_ticks()
-            cb.outline.set_alpha(_num(self.legend_alpha, 1.0))
+            cb.outline.set_alpha(_num(self.legend_edge_alpha, 1.0))
             if self.legend_border.get():
                 cb.outline.set_edgecolor(edge)
                 cb.outline.set_linewidth(_num(self.legend_bw, 1.0))
@@ -8325,6 +8421,26 @@ class App:
             zpad = (zhi - zlo) * 0.03 or 0.01
             self.ax.set_zlim(zlo - zpad, zhi + zpad)
 
+        if (getattr(self, "legend_direct", None) is not None
+                and self.legend_direct.get()):
+            try:
+                _fsd = int(self.legend_fs.get())
+            except (ValueError, tk.TclError):
+                _fsd = 9
+            for rank, (r, (x, z)) in enumerate(zip(shown, ridges)):
+                if not len(x):
+                    continue
+                _fin = np.isfinite(x) & np.isfinite(z)
+                if not _fin.any():
+                    continue
+                _i = np.where(_fin)[0][-1]
+                _cl = self._trace_color(r, cmap_name, shown)
+                self.ax.text(float(x[_i]), ypos[rank],
+                             float(np.clip(z[_i], zlo, zhi)),
+                             "  %.2f" % r["pressure_val"], color=_cl,
+                             fontsize=_fsd, ha="left", va="center",
+                             zorder=1e5)
+
         # faint 2D shadow projections onto the back wall and/or floor
         proj = self.wf3d_project.get()
         if proj != "Off" and ridges:
@@ -8484,7 +8600,11 @@ class App:
                            for cy in (by0, by1) for cz in (bz0, bz1)]
                 grp = {"floor": True, "posts": True, "top": True}
                 open_front = fmode == "open front"
-                if fmode == "floor only":
+                axes_want = False
+                if fmode == "3 axes":
+                    grp = {"floor": False, "posts": False, "top": False}
+                    axes_want = True
+                elif fmode == "floor only":
                     grp["posts"] = grp["top"] = False
                 elif fmode == "no top":
                     grp["top"] = False
@@ -8493,12 +8613,21 @@ class App:
                     grp["posts"] = self.wf3d_fr_posts.get()
                     grp["top"] = self.wf3d_fr_top.get()
                     open_front = self.wf3d_fr_open.get()
+                    axes_want = self.wf3d_fr_axes.get()
+                nxv, nyv = near[0], near[1]
+                fxv = bx0 if nxv == bx1 else bx1
+                fyv = by0 if nyv == by1 else by1
+                axes3 = {
+                    frozenset(((bx0, nyv, bz0), (bx1, nyv, bz0))),
+                    frozenset(((nxv, by0, bz0), (nxv, by1, bz0))),
+                    frozenset(((nxv, fyv, bz0), (nxv, fyv, bz1)))}
                 _shade = (self.wf3d_frame_color.get()
                           if getattr(self, "wf3d_frame_color", None)
                           is not None else "auto")
                 fcol = {"black": "#1a1a1a", "dark gray": "#555555",
                         "gray": "#999999", "light gray": "#cccccc",
                         "white": "#ffffff"}.get(_shade, acol)
+                _axis_lines = []
                 for a, b in itertools.combinations(corners, 2):
                     if sum(pa != pb for pa, pb in zip(a, b)) != 1:
                         continue
@@ -8508,13 +8637,33 @@ class App:
                         g = "top"
                     else:
                         g = "floor"
-                    if not grp[g]:
+                    _eset = frozenset((a, b))
+                    _in_axes = axes_want and _eset in axes3
+                    if not (grp[g] or _in_axes):
                         continue
-                    if open_front and near in (a, b):
+                    if open_front and near in (a, b) and not _in_axes:
                         continue
-                    self.ax.plot3D([a[0], b[0]], [a[1], b[1]],
-                                   [a[2], b[2]], color=fcol, lw=slw,
-                                   zorder=1e4)
+                    _ln = self.ax.plot3D([a[0], b[0]], [a[1], b[1]],
+                                         [a[2], b[2]], color=fcol, lw=slw,
+                                         zorder=1e4)
+                    if _in_axes:
+                        _axis_lines.extend(_ln)
+                # The three tick-axis lines are coplanar with the extreme
+                # ridge walls, so matplotlib's depth sort (computed_zorder
+                # stays True) draws the wall over them at many angles. Force
+                # just these lines to the FRONT of the sort with the same
+                # do_3d_projection trick the ridges use (_tag_depth) -- this
+                # leaves computed_zorder alone, so ridge stacking is
+                # untouched. Ordinary box edges keep depth-sorting.
+                for _al in _axis_lines:
+                    _al.set_clip_on(False)
+                    _abase = _al.do_3d_projection
+
+                    def _front(*a, _b=_abase, **k):
+                        _b(*a, **k)
+                        return -1e9
+
+                    _al.do_3d_projection = _front
         except Exception:
             pass
         yaspect = 1.2
@@ -8550,7 +8699,9 @@ class App:
             cb = self.fig.colorbar(sm, ax=self.ax, shrink=0.6, pad=0.08,
                                    **self._cbar_kwargs())
             self._style_colorbar(cb)
-        elif self.legend_on.get():
+        elif (self.legend_on.get()
+              and not (getattr(self, "legend_direct", None) is not None
+                       and self.legend_direct.get())):
             import matplotlib.patches as mpatches
             entries = []
             for rank, r in enumerate(shown):
@@ -8889,6 +9040,8 @@ class App:
             "auto_key": self.auto_key, "legend_swatch": self.legend_swatch,
             "zoom2d_axis": self.zoom2d_axis,
             "legend_border": self.legend_border, "legend_alpha": self.legend_alpha,
+            "legend_edge_alpha": self.legend_edge_alpha,
+            "legend_direct": self.legend_direct,
             "legend_bw": self.legend_bw, "legend_edge": self.legend_edge,
             "legend_fs": self.legend_fs,
             "legend_title": self.legend_title,
@@ -8911,6 +9064,7 @@ class App:
             "wf3d_fr_posts": self.wf3d_fr_posts,
             "wf3d_fr_top": self.wf3d_fr_top,
             "wf3d_fr_open": self.wf3d_fr_open,
+            "wf3d_fr_axes": self.wf3d_fr_axes,
             "plot_theme_bg": self.plot_theme_bg,
             "df_compare": self.df_compare,
             "wf3d_pane_alpha": self.wf3d_pane_alpha,
@@ -9150,13 +9304,17 @@ class App:
             "  Pressure uses 'p' for the decimal: 1p39 = 1.39 GPa; 0 GPa is\n"
             "  allowed and a missing pressure field is assumed 0 GPa\n"
             "  .{seq} = grating segment; omit it for single-stitch files\n"
-            "  Incomplete channel sets (e.g. bg only) load as raw counts\n\n"
+            "  Incomplete channel sets (e.g. bg only) load as raw counts\n"
+            "  Any other scheme: teach it in 'Name format', or let Guess\n"
+            "  format read the folder; hand fixes are remembered per folder.\n\n"
             "TIPS\n"
-            "  - Move the Waterfall panel controls for 2D stacked / 3D ridge.\n"
+            "  - Waterfall box: off / 2D stacked / 3D ridge plot modes.\n"
+            "  - Click a curve to select it; right-click it for quick actions.\n"
             "  - Offset/step sets 3D ridge spacing when Even rank spacing is on.\n"
             "  - Top/right axis in wavenumber or energy needs X min > 0.\n"
             "  - Save / Load session keeps folders + every plotting setting.\n"
-            "  - [ and ] cycle the colormap; right-click a slider resets it.\n")
+            "  - [ and ] cycle the colormap; the reset button beside a slider\n"
+            "    restores its default.\n")
         txt.insert("1.0", body); txt.configure(state="disabled")
 
     def _peak_readout(self):

@@ -44,6 +44,20 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   icon set, themed title bar, eight themes including true-black and paper,
   and an adjustable interface text size.
 
+## New in v1.4.4
+
+- **Direct labels at curves**: label every curve at its end with its
+  pressure, in the trace color, instead of a legend box (2D overlay,
+  2D stacked, and 3D ridge).
+- **Legend frame control**: border opacity independent of background
+  opacity, edge color, and up to 16 columns.
+- **"3 axes" box frame** is the new 3D default: the classic matplotlib
+  look with just the x / y / z tick axes facing you, always drawn on top
+  so ridge walls can't hide them; custom mode can force them into any
+  edge mix.
+- In-app guide, About page, and tooltips brought up to date with all of
+  the above (and stale claims removed).
+
 ## New in v1.4.3
 
 - **Work the plot directly**: click a curve to select it, double-click to
@@ -111,6 +125,9 @@ any unsigned exe): More info -> Run anyway.
 
 ## Version history
 
+- **v1.4.4** — direct trace labels (2D + 3D); independent legend border
+  opacity and up to 16 columns; "3 axes" box frame (new 3D default,
+  occlusion-proof); refreshed in-app guides.
 - **v1.4.3** — clickable plot (select / solo / hide / right-click quick
   actions); filename-grammar auto-guess; per-point quality flags; Rescan;
   defringe compare; adaptive text size and DPI-proof layout; hairline-card
