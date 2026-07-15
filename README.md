@@ -5,7 +5,7 @@ publication-quality visualization of visible / near-IR optical-absorption
 spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
 22-IR-1; formerly the Beamline DAC Data Tool).
 
-![SQUISHE — 19-pressure absorbance series in the paper theme](docs/screenshot.png)
+![SQUISHE — filled 3D ridge view of a 19-pressure absorbance series](docs/screenshot.png)
 
 ## What it does
 
@@ -41,8 +41,27 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   sidecar (tool version, parameters, timestamps, file hashes).
 - **A designed interface**: the SQUISHE visual system — bundled Jost
   typeface (OFL), per-theme accent triads across every control, geometric
-  icon set, themed title bar, eight themes including true-black and paper,
-  and an adjustable interface text size.
+  icon set, themed title bar and top banner, a named theme set (from clean
+  Standard Light and true-black to Rainbow, Coast Guard, and more), and an
+  adjustable interface text size.
+
+## New in v1.4.5
+
+- **Themes, expanded**: a named theme set in the top-bar Theme menu —
+  Standard Light, Flashbang White, Kinda Dark, Black Hole, and the accent
+  themes Semper Paratus, Touch Grass, Pink Pony Club, Davy Jones, New
+  Mexico, Ocean, Rainbow, Synthwave, Christmas, and Tet — each with a
+  themed top banner and per-section accent colors down the settings panels.
+- **Sturdier reduction**: a data-integrity pass — grating channels aligned
+  by wavelength (not array index), tolerant file decoding, non-finite
+  pressures rejected, and a re-entrancy guard so a mid-run rescan can't
+  corrupt output — with the test suite grown to 53.
+- **3D axis frame** now genuinely draws on top at every camera angle
+  (occlusion-proof), and an all-hidden 3D view shows a themed empty state
+  instead of a blank white box.
+- **Interface polish**: readable dropdown lists in every theme, uniform
+  button spacing, a grab handle on each panel divider, and field text that
+  stays legible on light fields in dark themes.
 
 ## New in v1.4.4
 
@@ -125,6 +144,11 @@ any unsigned exe): More info -> Run anyway.
 
 ## Version history
 
+- **v1.4.5** — expanded, named theme set with themed banners and
+  per-section accent colors; data-integrity hardening (channel
+  wavelength-alignment, tolerant decoding, re-entrancy guard) and a
+  53-test suite; occlusion-proof 3D axis frame; readable dropdowns in
+  every theme and interface polish.
 - **v1.4.4** — direct trace labels (2D + 3D); independent legend border
   opacity and up to 16 columns; "3 axes" box frame (new 3D default,
   occlusion-proof); refreshed in-app guides.

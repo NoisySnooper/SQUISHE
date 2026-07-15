@@ -29,6 +29,8 @@ import os
 import csv
 import json
 import hashlib
+import math
+
 import numpy as np
 
 VALID_MEAS = ("dark", "background", "sample")
@@ -132,8 +134,9 @@ def parse_segment_filename(fname):
     except ValueError:
         return {"skip": True, "reason": "pressure '%s' not numeric" % pressure_str,
                 "raw": raw}
-    if pressure_val < 0:
-        return {"skip": True, "reason": "pressure < 0", "raw": raw}
+    if not math.isfinite(pressure_val) or pressure_val < 0:
+        return {"skip": True, "reason": "pressure not finite / < 0",
+                "raw": raw}
 
     return {"dac": dac, "sample": sample, "pressure_str": pressure_str,
             "pressure_val": pressure_val, "meas": meas, "rep": rep,
@@ -214,7 +217,7 @@ def _parse_pressure_token(tok, dec, strip_units):
         v = float(t)
     except ValueError:
         return None, None
-    if v < 0:
+    if not math.isfinite(v) or v < 0:
         return None, None
     return ("%g" % v).replace(".", "p"), v
 
@@ -449,6 +452,8 @@ def guess_profile(fnames, name="guessed"):
 
     press_col, press_frac, press_dec = None, 0.0, "p"
     for i in range(ncol):
+        if i == 0:
+            continue        # column 0 is the dac id; pressure never lives here
         vals = col(i)
         hits, dec_hits = 0, {"p": 0, ".": 0, ",": 0}
         marked = 0
@@ -495,6 +500,18 @@ def guess_profile(fnames, name="guessed"):
             break
     ids = [i for i in range(ncol)
            if i not in (press_col, role_col, branch_col, rep_col)]
+    # guess #1: pressure/rep must never steal the dac/sample id columns; if
+    # they left < 2 free columns, release the weakest bare-integer claim.
+    if len(ids) < 2:
+        for _rel in ("rep_col", "press_col"):
+            if len(ids) >= 2:
+                break
+            if _rel == "rep_col" and rep_col is not None:
+                rep_col = None
+            elif _rel == "press_col" and press_col is not None and press_frac <= 0.5:
+                press_col = None
+            ids = [i for i in range(ncol)
+                   if i not in (press_col, role_col, branch_col, rep_col)]
     if len(ids) < 2:
         return default_profile(name), 0
     dac_col, sample_col = ids[0], ids[1]
@@ -553,7 +570,8 @@ def read_spectrum(path):
     Returns (wavelengths, counts) as float ndarrays.
     """
     wl, cts = [], []
-    with open(path, "r", newline="") as f:
+    with open(path, "r", newline="", encoding="utf-8-sig",
+              errors="replace") as f:
         for row in csv.reader(f):
             if len(row) < 2:
                 continue
@@ -689,28 +707,35 @@ def process_group(gkey, group, warn=None):
                      % (dac, sample, pstr, arep))
             continue
 
-        wl = None
-        chans = {}
+        grids = {}
         for m in present:
             w, c = _concat_segments(srcs[m], common)
-            if wl is None:
-                wl = w
-            chans[m] = c
-
-        lens = {len(wl)} | {len(c) for c in chans.values()}
-        if len(lens) > 1 and warn:
-            warn("%s_%s_%s rep%d: channel lengths differ %s -- check for a "
-                 "truncated segment file (points may misalign)"
-                 % (dac, sample, pstr, arep, sorted(lens)))
-        n = min(lens)
-        wl = wl[:n]
-        for m in chans:
-            chans[m] = chans[m][:n]
-
-        order = np.argsort(wl)
-        wl = wl[order]
-        for m in chans:
-            chans[m] = chans[m][order]
+            o = np.argsort(w)
+            grids[m] = (np.asarray(w, float)[o], np.asarray(c, float)[o])
+        wl = grids[anchor][0]
+        lens = {len(g[0]) for g in grids.values()}
+        same_grid = (len(lens) == 1 and all(
+            np.array_equal(grids[m][0], wl) for m in present))
+        chans = {}
+        if same_grid:
+            for m in present:
+                chans[m] = grids[m][1]
+        else:
+            # channels sit on different wavelength grids (a truncated or
+            # differently-binned segment). Align every channel to the anchor
+            # grid by interpolation; points outside a channel's own range
+            # become NaN (absorbance there is undefined, not extrapolated).
+            if warn:
+                warn("%s_%s_%s rep%d: channel grids differ %s -- aligned by "
+                     "wavelength (interpolated onto the %s grid)"
+                     % (dac, sample, pstr, arep, sorted(lens), anchor))
+            for m in present:
+                gw, gc = grids[m]
+                if np.array_equal(gw, wl):
+                    chans[m] = gc
+                    continue
+                yc = np.interp(wl, gw, gc, left=np.nan, right=np.nan)
+                chans[m] = yc
 
         def _ch(name):
             return chans[name] if name in chans else np.full(len(wl), np.nan)
@@ -760,7 +785,7 @@ def write_absorbance_csv(result, out_dir):
     if result.get("branch_tag"):
         stem += "_" + result["branch_tag"]
     path = os.path.join(out_dir, stem + "_absorbance.csv")
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["Wavelength_nm", "Wavenumber_cm-1", "Absorbance",
                     "Dark", "Background", "Sample"])
@@ -818,7 +843,7 @@ def load_processed_folder(in_dir, log=None):
                             data[k].append(float(row[i]))
                         except ValueError:
                             data[k].append(np.nan)
-        except OSError:
+        except (OSError, ValueError, UnicodeDecodeError):
             continue
         wl = np.asarray(data["wavelength_nm"], float)
         if wl.size < 2:

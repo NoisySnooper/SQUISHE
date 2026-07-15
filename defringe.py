@@ -51,6 +51,13 @@ def fisher_g_pvalue(periodogram):
         # an all-zero / all-NaN periodogram has no periodicity to test
         return g, 1.0
     p_terms = int(1.0 / g)            # floor(1/g)
+    # The exact alternating-sum form is only numerically stable for a small
+    # number of terms (a strong fringe: g large, p_terms 1-3). A near-flat
+    # periodogram gives g ~ 1/n, so p_terms ~ n; that path both overflows
+    # comb(n, j) and loses all precision to cancellation. Weak periodicity
+    # is by definition not significant, so return p = 1 (do not notch).
+    if p_terms > 30:
+        return g, 1.0
     pvalue = 0.0
     for j in range(1, p_terms + 1):
         term = (-1.0) ** (j - 1) * comb(n, j, exact=True) * (1.0 - j * g) ** (n - 1)
@@ -242,7 +249,7 @@ def write_notch_csv(result, out_dir, width_frac=NOTCH_WIDTH_FRAC,
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, _result_stem(result) + "_absorbance_notch.csv")
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(header)
         for row in zip(*cols):
