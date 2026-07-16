@@ -175,4 +175,5 @@ any unsigned exe): More info -> Run anyway.
 
 ## License
 
-Internal lab tool. All rights reserved by the authors.
+[MIT](LICENSE). The bundled Jost typeface is licensed separately under the
+SIL Open Font License 1.1 (`fonts/OFL.txt`).
