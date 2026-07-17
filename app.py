@@ -313,15 +313,16 @@ PANEL_GUIDE = (
     "    Nature 89/183 mm and Science 5.7/12.1/18.4 cm (sans-serif), RSI/AIP\n"
     "    3.37/6.69 in, APS 3.4/7.0 in (serif), Elsevier 90/190 mm. Also sets\n"
     "    font, sizes, line weight, thin spines, ticks-in, and DPI.\n"
-    "  W x H in / Apply - custom size. 'Preview at export size (WYSIWYG)'\n"
-    "    renders the on-screen figure at the exact export dimensions so you\n"
-    "    see the true printed proportions (off = fill the window).\n"
+    "  W x H in / Apply - custom size.\n"
     "  'Apply clean style' - no grid, thin spines, ticks in (font-agnostic).\n"
     "  Transparent / Tight bbox / Pad / Face - export page options.\n"
     "  (Font family and title/label/tick sizes are in the Style box.)\n\n"
     "PRESETS\n"
     "  Save the whole control state under a name; reload from the dropdown.\n\n"
     "EXPORT\n"
+    "  'Preview at export size (WYSIWYG)' renders the on-screen figure\n"
+    "  at the exact export dimensions so you see the true printed\n"
+    "  proportions and text size before saving (off = fill the window).\n"
     "  Save plot (PNG/PDF/SVG/EPS/TIFF; vector embeds fonts). Batch PNG =\n"
     "  one image per shown trace. Export CSV... = smoothed (wl / cm^-1 /\n"
     "  eV + raw + smoothed columns) or defringed CSVs."
@@ -5366,6 +5367,15 @@ class App:
                     width=5).pack(side="left")
         ttk.Button(dr, text="Copy figure", command=self._copy_clipboard).pack(
             side="left", padx=(8, 0))
+        self.fig_preview = tk.BooleanVar(value=False)
+        pvc = ttk.Checkbutton(ex, text="Preview at export size (WYSIWYG)",
+                              variable=self.fig_preview,
+                              command=self._apply_preview_size)
+        pvc.pack(anchor="w", pady=(2, 0))
+        Tooltip(pvc, "Render the on-screen figure at the exact export width "
+                     "and height (Figure box), so you see the true printed "
+                     "proportions and text size before saving. Off = fill "
+                     "the window.")
         ttk.Button(ex, text="Save plot...", command=self._save_plot).pack(
             fill="x", pady=(4, 0))
         ttk.Button(ex, text="Batch export PNG (one per shown trace)...",
@@ -5911,14 +5921,6 @@ class App:
             e.bind("<FocusOut>", lambda ev: self._apply_preview_size())
         ttk.Button(sr, text="Apply", width=6,
                    command=self._apply_preview_size).pack(side="left")
-        self.fig_preview = tk.BooleanVar(value=False)
-        pvc = ttk.Checkbutton(jf, text="Preview at export size (WYSIWYG)",
-                              variable=self.fig_preview,
-                              command=self._apply_preview_size)
-        pvc.pack(anchor="w", pady=(2, 0))
-        Tooltip(pvc, "Render the on-screen figure at the exact export width and "
-                     "height, so you see the true proportions and printed text "
-                     "size. Off = fill the window.")
         # publication export quality (used by Save plot / Copy figure)
         self.fig_transparent = tk.BooleanVar(value=False)
         tcb = ttk.Checkbutton(jf, text="Transparent background",
@@ -8349,9 +8351,13 @@ class App:
             # 3D ridge is inherently multi-pressure; render the landscape.
             # Inspect (one pressure's channels) is 2D only, so it overrides 3D.
             self.ax = self.fig.add_subplot(111, projection="3d")
+            self._wf3d_cbar_vert = False
             self._draw_wf3d(unit, cmap_name, lw)
-            # tight_layout fights 3D axes; use a fixed margin instead
-            self.fig.subplots_adjust(left=0.02, right=0.98, top=0.96, bottom=0.04)
+            # tight_layout fights 3D axes; use a fixed margin instead. A
+            # vertical colorbar (explicit cax at x=0.90) needs the 3D axes
+            # held back so the projected z ticks/label stay clear of it.
+            _r = 0.80 if self._wf3d_cbar_vert else 0.98
+            self.fig.subplots_adjust(left=0.02, right=_r, top=0.96, bottom=0.04)
             self._sync_limit_boxes()
             self._sync_tick_boxes(self.ax, True)
             self.canvas.draw_idle(); return
@@ -9305,9 +9311,28 @@ class App:
             sm = ScalarMappable(norm=Normalize(pmin, pmax),
                                 cmap=colormaps._continuous_cmap(cmap_name))
             sm.set_array([])
-            cb = self.fig.colorbar(sm, ax=self.ax, shrink=0.6, pad=0.08,
-                                   **self._cbar_kwargs())
-            self._style_colorbar(cb)
+            ckw = self._cbar_kwargs()
+            if ckw.get("orientation") == "horizontal":
+                cb = self.fig.colorbar(sm, ax=self.ax, shrink=0.6, pad=0.08,
+                                       **ckw)
+                self._style_colorbar(cb)
+            else:
+                # vertical: an explicit cax we own. fig.colorbar(ax=...)
+                # places the bar so far right that its ticks + rotated
+                # label fall off the page at journal aspect ratios, and a
+                # locator re-applies that position on every draw. Reserve
+                # the right edge for the bar and keep the 3D axes clear
+                # of it (fixes the z-label / colorbar collision too).
+                try:
+                    frac = max(0.012, min(0.06, ckw.pop("fraction", 0.046)
+                                          * 0.5))
+                except Exception:
+                    frac = 0.022
+                cax = self.fig.add_axes([0.90, 0.20, frac, 0.60])
+                cb = self.fig.colorbar(sm, cax=cax, **ckw)
+                self._style_colorbar(cb)
+                cb.ax.yaxis.labelpad = 8
+                self._wf3d_cbar_vert = True   # narrows the 3D axes margin
         elif (self.legend_on.get()
               and not (getattr(self, "legend_direct", None) is not None
                        and self.legend_direct.get())):
@@ -10115,15 +10140,54 @@ class App:
             self.fig.set_size_inches(old)   # keep the live canvas intact
             self.canvas.draw_idle()
 
+    def _bbox3d_inches(self, pad):
+        """Pixel-accurate tight bbox (inches) for 3D exports. Matplotlib's
+        tight-bbox machinery mis-measures Axes3D content (projected ridges,
+        zoomed cameras): it can crop straight through the plot or balloon
+        the page far past the requested journal size. Render at the export
+        size, scan the pixels for content vs the page colour, clamp to the
+        figure. Returns None on any failure (caller falls back to 'tight');
+        call with the figure already at its export size."""
+        try:
+            from matplotlib.colors import to_rgba
+            from matplotlib.transforms import Bbox
+            self.fig.canvas.draw()
+            buf = np.asarray(self.fig.canvas.buffer_rgba())
+            H = buf.shape[0]
+            base = np.asarray([int(round(c * 255))
+                               for c in to_rgba(self.fig.get_facecolor())])
+            diff = np.abs(buf.astype(np.int16) - base).sum(axis=2)
+            ys, xs = np.where(diff > 24)
+            if not len(ys):
+                return None
+            dpi = float(self.fig.dpi)
+            fw, fh = self.fig.get_size_inches()
+            x0 = max(0.0, xs.min() / dpi - pad)
+            x1 = min(float(fw), (xs.max() + 1) / dpi + pad)
+            y0 = max(0.0, (H - 1 - ys.max()) / dpi - pad)
+            y1 = min(float(fh), (H - ys.min()) / dpi + pad)
+            if x1 - x0 < 0.5 or y1 - y0 < 0.5:
+                return None
+            return Bbox.from_extents(x0, y0, x1, y1)
+        except Exception:
+            return None
+
     def _export_kwargs(self):
-        """savefig kwargs from the Journal/figure export controls."""
+        """savefig kwargs from the Journal/figure export controls. Call with
+        the figure already at its export size (Save plot / Copy figure do)."""
         kw = {}
         if getattr(self, "fig_tight", None) is None or self.fig_tight.get():
-            kw["bbox_inches"] = "tight"
             try:
-                kw["pad_inches"] = float(self.fig_pad.get())
+                pad = float(self.fig_pad.get())
             except (ValueError, tk.TclError):
-                pass
+                pad = 0.1
+            bb = (self._bbox3d_inches(pad)
+                  if getattr(self.ax, "name", "") == "3d" else None)
+            if bb is not None:
+                kw["bbox_inches"] = bb
+            else:
+                kw["bbox_inches"] = "tight"
+                kw["pad_inches"] = pad
         if getattr(self, "fig_transparent", None) is not None \
                 and self.fig_transparent.get():
             kw["transparent"] = True
@@ -10262,9 +10326,22 @@ class App:
         """Copy the current figure to the system clipboard as an image."""
         import sys
         try:
+            old = self.fig.get_size_inches()
+            try:
+                self.fig.set_size_inches(float(self.fig_w.get()),
+                                         float(self.fig_h.get()))
+            except (ValueError, tk.TclError):
+                pass
+            kw = self._export_kwargs()
+            kw.pop("transparent", None)          # clipboard DIB has no alpha
+            kw.setdefault("facecolor", self.fig.get_facecolor())
             buf = io.BytesIO()
-            self.fig.savefig(buf, format="png", dpi=int(self.dpi.get()),
-                             bbox_inches="tight")
+            try:
+                self.fig.savefig(buf, format="png", dpi=int(self.dpi.get()),
+                                 **kw)
+            finally:
+                self.fig.set_size_inches(old)
+                self.canvas.draw_idle()
             buf.seek(0)
             if sys.platform == "win32":
                 import win32clipboard
