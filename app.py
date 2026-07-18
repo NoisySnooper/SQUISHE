@@ -1,5 +1,5 @@
 """
-app.py  --  Beamline DAC Data Tool  (Concatenator / Absorbance Calculator / Plotter)
+app.py  --  SQUISHE, formerly the Beamline DAC Data Tool  (Concatenator / Absorbance Calculator / Plotter)
 
 GUI front end for the NSLS-II 22-IR-1 visible-absorption quick-look workflow.
 Pick an input folder of raw segments -> Run -> per-pressure absorbance CSVs
@@ -61,10 +61,17 @@ SETTINGS_PATH = os.path.join(TOOL_DIR, ".quicklook_settings.json")
 FONTS = ["Jost", "Segoe UI", "DejaVu Sans", "DejaVu Serif",
          "Times New Roman", "Arial", "Calibri", "Cambria", "Georgia",
          "Consolas"]
-LEGEND_LOCS = ["best", "upper right", "upper left", "lower left",
-               "lower right", "center right", "outside right"]
+LEGEND_LOCS = ["best", "upper right", "upper left", "upper center",
+               "lower left", "lower right", "lower center",
+               "center left", "center right", "outside right",
+               "outside left", "outside top", "outside bottom"]
+# outside-the-axes placements: display name -> (bbox anchor, mpl loc)
+LEG_OUTSIDE = {"outside right": ((1.02, 1.0), "upper left"),
+               "outside left": ((-0.02, 1.0), "upper right"),
+               "outside top": ((0.5, 1.02), "lower center"),
+               "outside bottom": ((0.5, -0.08), "upper center")}
 
-APP_VERSION = "v1.4.5"
+APP_VERSION = "v1.4.6"
 APP_CODENAME = "Olivine"
 
 # ---------------------------------------------------------------------------
@@ -192,19 +199,22 @@ QUICK_START = (
 
 PANEL_GUIDE = (
     "PANEL GUIDE\n\n"
-    "NEW IN v1.4.5\n"
-    "  Themes: the top-bar Theme menu offers a named set - Standard Light,\n"
-    "    Flashbang White, Kinda Dark, Black Hole, and the accent themes\n"
-    "    Semper Paratus, Touch Grass, Pink Pony Club, Davy Jones, New\n"
-    "    Mexico, Ocean, Rainbow, Synthwave, Christmas, and Tet - each with\n"
-    "    a themed top banner and per-section accent colours down the\n"
-    "    settings panels.\n"
-    "  Sturdier reduction: grating channels align by wavelength, odd file\n"
-    "    encodings and non-finite pressures are handled, and a rescan can\n"
-    "    no longer collide with a running reduction.\n"
-    "  Polish: dropdown lists stay readable in every theme, buttons are\n"
-    "    evenly spaced, each panel divider has a grab handle, and the 3D\n"
-    "    axis frame stays drawn on top at every camera angle.\n\n"
+    "NEW IN v1.4.6\n"
+    "  Deep export: 'Also save' writes PNG/PDF/SVG/TIF in one go,\n"
+    "    'Editable text' embeds journal-safe TrueType in the vectors,\n"
+    "    grayscale print-check copy, file-name template, in-file\n"
+    "    metadata, and batch export now uses the fully styled figure.\n"
+    "  Placement freedom: every located element (legend, title,\n"
+    "    colorbar) has live X/Y readout boxes - type both to pin a\n"
+    "    custom spot; colorbar can sit right/left/top/bottom; more\n"
+    "    legend locations incl. outside left/top/bottom.\n"
+    "  Text styling: Bold/Italic per element (Fonts box), tick number\n"
+    "    formats, X tick rotation, a page footnote, and a 2D inset\n"
+    "    zoom panel for edge close-ups.\n"
+    "  Accessibility: High Contrast and Colorblind Safe (Okabe-Ito)\n"
+    "    themes; plot-page artists now follow the actual page colour.\n"
+    "  Quick Access, Progress and Guide cards collapse; panel drags\n"
+    "    and theme switches are much faster.\n\n"
     "TABS & SESSIONS  (row above the plot)\n"
     "  Each tab is an independent session with its own data, folders,\n"
     "    settings, and undo history. '+' opens a blank tab; double-click a\n"
@@ -292,24 +302,44 @@ PANEL_GUIDE = (
     "  this spectrometer (101 / 51 points).\n\n"
     "VERTICAL MARKERS\n"
     "  Vertical lines at given wavelengths (comma-separated), e.g. an edge.\n\n"
+    "INSET ZOOM  (2D plot options)\n"
+    "  Magnify an X range in a corner panel (absorption edge close-up);\n"
+    "  the region is outlined on the main plot. Footnote (Title & axis\n"
+    "  labels) stamps a small note at the page's bottom-left.\n\n"
     "TITLE / LABELS / LEGEND / COLORBAR\n"
+    "  Bold / Italic rows style each text element separately (title,\n"
+    "    axis labels, tick numbers, legend, colorbar), 2D and 3D.\n"
+    "    Mathtext works in any label box: $\\lambda$, Fe$^{2+}$...\n"
+    "  Ticks box: X/Y number format (fixed decimals or scientific)\n"
+    "    and X tick rotation.\n"
     "  Edit title and axis labels (positions and gaps in the Style\n"
     "    box). Legend on/off + location ('outside right' keeps it off\n"
     "    the data) + up to 16 columns + title + key style (color box /\n"
     "    line).\n"
-    "  Direct labels at curves - write each pressure at its curve end,\n"
-    "    in the trace color, instead of a legend box; works in 2D\n"
-    "    overlay, 2D stacked, and 3D ridge.\n"
+    "  X / Y boxes (Legend, Title, Colorbar) always show the position\n"
+    "    actually drawn (legend/title in axes fractions, colorbar in\n"
+    "    figure fractions). Type both numbers to pin a custom spot;\n"
+    "    blank one, or change Location, to follow automatically again.\n"
+    "    Exports auto-fit an oversized legend (more columns, smaller\n"
+    "    font) and write the values used back into the panel.\n"
+    "  Direct labels at curves - write each pressure at its curve end\n"
+    "    instead of a legend box; label size and color (trace / fixed)\n"
+    "    have their own controls. Works in 2D overlay, 2D stacked,\n"
+    "    and 3D ridge.\n"
     "  Frame - border on/off, width, edge color, and separate\n"
     "    background / border opacities (shared with the colorbar).\n"
     "  Colorbar - a continuous pressure scale (labeled 'Pressure\n"
-    "    (GPa)').\n"
+    "    (GPa)'); Location puts it right / left (vertical) or top /\n"
+    "    bottom (flat).\n"
     "  'Auto: colorbar for many traces' (off by default) - when on, a\n"
     "    continuous colormap with >10 traces uses a colorbar instead of\n"
     "    a large legend that would hide the data. A categorical colormap\n"
     "    always keeps a discrete legend.\n\n"
     "FIGURE  (journal presets + export)\n"
     "  Journal preset - sets column width AND house style in one pick:\n"
+    "    the presets marked 3D also style the 3D scene the way those\n"
+    "    journals print it (minimal 3-axes frame, no panes or grid,\n"
+    "    pressure colorbar instead of a legend, standard camera).\n"
     "    Nature 89/183 mm and Science 5.7/12.1/18.4 cm (sans-serif), RSI/AIP\n"
     "    3.37/6.69 in, APS 3.4/7.0 in (serif), Elsevier 90/190 mm. Also sets\n"
     "    font, sizes, line weight, thin spines, ticks-in, and DPI.\n"
@@ -323,9 +353,15 @@ PANEL_GUIDE = (
     "  'Preview at export size (WYSIWYG)' renders the on-screen figure\n"
     "  at the exact export dimensions so you see the true printed\n"
     "  proportions and text size before saving (off = fill the window).\n"
-    "  Save plot (PNG/PDF/SVG/EPS/TIFF; vector embeds fonts). Batch PNG =\n"
-    "  one image per shown trace. Export CSV... = smoothed (wl / cm^-1 /\n"
-    "  eV + raw + smoothed columns) or defringed CSVs."
+    "  Save plot (PNG/PDF/SVG/EPS/TIFF). 'Also save' writes every\n"
+    "  ticked extra format in one go; 'Editable text' embeds TrueType\n"
+    "  text in the vectors (journal-safe, Illustrator-editable);\n"
+    "  'Grayscale copy' adds a print-survival check PNG; the Name\n"
+    "  template ({tab} {mode} {wf} {preset} {cmap} {date}) suggests the\n"
+    "  file name; PNG/PDF/SVG carry tool-version metadata. Batch export\n"
+    "  solos each shown trace on the CURRENT styled figure and saves\n"
+    "  one file per trace (png/pdf/svg/tif). Export CSV... = smoothed\n"
+    "  (wl / cm^-1 / eV + raw + smoothed columns) or defringed CSVs."
 )
 
 SHORTCUTS_TEXT = (
@@ -665,6 +701,8 @@ THEME_LABELS = {
     "synthwave": "Synthwave",
     "christmas": "Christmas",
     "tet": "Tet",
+    "highcontrast": "High Contrast",
+    "colorblind": "Colorblind Safe",
 }
 
 
@@ -769,7 +807,12 @@ class App:
         self._apply_brand()
         # DWM ignores caption colors set before the window is
         # composited; re-apply once mapped and shortly after
-        root.bind("<Map>", lambda e: self._apply_titlebar(), add="+")
+        # NB: a bind on root fires for EVERY child widget's <Map> (their
+        # bindtags include the toplevel) -- re-adding a hidden pane maps
+        # hundreds of widgets and used to re-apply the titlebar for each
+        root.bind("<Map>",
+                  lambda e: (self._apply_titlebar()
+                             if e.widget is root else None), add="+")
         root.after(400, self._apply_titlebar)
 
         # multi-tab sessions: one shared widget tree, per-tab state swapped
@@ -872,6 +915,10 @@ class App:
                               field="#a01f1f", accent="#FFCF33"),
             "synthwave": dict(base="dark", bg="#1a1030", fg="#e8d5ff",
                               field="#241447", accent="#ff3caf"),
+            "highcontrast": dict(base="dark", bg="#000000", fg="#ffffff",
+                                 field="#000000", accent="#ffd400"),
+            "colorblind": dict(base="light", bg="#ffffff", fg="#000000",
+                               field="#ffffff", accent="#0072B2"),
             "forest":    dict(base="light", bg="#eaf1e8", fg="#1b2e1b",
                               field="#ffffff", accent="#2e7d32"),
             "rose":      dict(base="light", bg="#fbeef3", fg="#3a1b2a",
@@ -897,6 +944,8 @@ class App:
             "christmas": ("#c8102e", "#3fae63", "#E8B84B", "#F0E6D0"),
             "tet":       ("#FFCF33", "#FF6B6B", "#FFE066", "#FFE0A0"),
             "synthwave": ("#ff3caf", "#3cd5ff", "#ffd24a", "#E0C8FF"),
+            "highcontrast": ("#FFD400", "#00E5FF", "#FFD400", "#FFFFFF"),
+            "colorblind": ("#0072B2", "#D55E00", "#E69F00", "#000000"),
             "forest":    ("#2E7D32", "#E4581C", "#C9A227", "#1B2E1B"),
             "rose":      ("#C2185B", "#8A63D2", "#DDA523", "#3A1B2A"),
             "ocean":     ("#26C6DA", "#F2984B", "#7FD1AE", "#DBEEFB"),
@@ -959,6 +1008,8 @@ class App:
             "christmas":  ["#E5484D", "#F2C14E", "#EDE3CC", "#5FC27E"],  # festive
             "tet":        ["#FFCF33", "#FF8A8A", "#8BC34A", "#FFE0A0"],  # Tet
             "synthwave":  ["#ff3caf", "#3cd5ff", "#ffd24a", "#b06bff"],  # neon
+            "highcontrast": ["#FFD400", "#00E5FF", "#FF61D8", "#FFFFFF"],
+            "colorblind": ["#0072B2", "#D55E00", "#009E73", "#CC79A7"],  # Okabe-Ito
         }.get(self.theme_mode.get())
 
     def _recolor_accents(self, accent=None, rainbow=False):
@@ -967,6 +1018,8 @@ class App:
         Rainbow keeps its per-section caret parade."""
         _u, fg, _fl, _pb, _pf = self._theme_palette()
         muted = "#9aa0a6" if self.dark_mode.get() else "#8a8d93"
+        if self.theme_mode.get() == "highcontrast":
+            muted = fg                   # no dimmed chrome in High Contrast
         pal = self._section_palette()
         _seen = {}
         for rec in getattr(self, "_collapsibles", []):
@@ -1035,10 +1088,7 @@ class App:
         alive = []
         for b in getattr(self, "_brand_btns", []):
             try:
-                _bt = self._auto_text_color(br["ac1"])
-                b.configure(bg=br["ac1"], activebackground=br["hov"],
-                            fg=_bt, activeforeground=_bt,
-                            disabledforeground="#cfcfcf")
+                self._tint_brand_button(b, br)
                 alive.append(b)
             except tk.TclError:
                 pass                       # button from a closed dialog
@@ -1071,6 +1121,17 @@ class App:
         seticon(getattr(self, "_collapse_btn", None), "chev_up")
         seticon(getattr(self, "_expand_btn", None), "chev_dn")
         seticon(getattr(self, "_resetall_btn", None), "reset")
+        try:
+            _cw = self.canvas.get_tk_widget()
+            if getattr(self, "fig_preview", None) is not None \
+                    and self.fig_preview.get():
+                _cw.configure(highlightthickness=2,
+                              highlightbackground=br["ac1"],
+                              highlightcolor=br["ac1"])
+            else:
+                _cw.configure(highlightthickness=0)
+        except Exception:
+            pass
         self._apply_titlebar()
         self._repaint_svttk_accent()
         if getattr(self, "_hdr_mark_lbl", None) is not None and ic.get("mark"):
@@ -1168,6 +1229,9 @@ class App:
                 pass
         self._slider_iconlabels = keep4
         if getattr(self, "_qa_title", None) is not None:
+            self._qa_caret()             # icons regenerate every theme
+        for _k in getattr(self, "_ccards", {}):
+            self._card_caret(_k)
             try:
                 self._qa_title.configure(foreground=br["ac3"])
             except tk.TclError:
@@ -1613,30 +1677,95 @@ class App:
         except Exception:
             pass
 
-    def _brand_button(self, parent, text, command, big=False):
-        """A primary-action button we fully own (sv_ttk's accent blue is
-        image-drawn and cannot be recolored): flat, triad ac1, hover shade."""
-        br = self._brand()
-        _txt = self._auto_text_color(br["ac1"])
+    def _blendc(self, c1, c2, f):
+        """Blend color c1 toward c2 by fraction f (hex out)."""
+        from matplotlib.colors import to_rgb
+        try:
+            a, b2 = to_rgb(c1), to_rgb(c2)
+        except ValueError:
+            return c1
+        return "#%02x%02x%02x" % tuple(
+            int(round(255 * (x + (y - x) * f))) for x, y in zip(a, b2))
+
+    def _tint_brand_button(self, b, br):
+        """Apply the active triad to one tiered button (see _brand_button)."""
+        uibg, fg, _fl, _pb, _pf = self._theme_palette()
+        tier = getattr(b, "_tier", "primary")
+        if tier == "primary":
+            _bt = self._auto_text_color(br["ac1"])
+            b.configure(bg=br["ac1"], fg=_bt, activebackground=br["hov"],
+                        activeforeground=_bt, disabledforeground="#cfcfcf",
+                        highlightthickness=0)
+            b._rest_bg, b._hot_bg = br["ac1"], br["hov"]
+            b._rest_fg = _bt
+        elif tier == "secondary":
+            # tonal chip: a light ac1-tinted fill (a Windows tk.Button
+            # cannot draw a colored outline reliably, so the tint IS the
+            # button shape), deepening on hover / press
+            tonal = self._blendc(uibg, br["ac1"], 0.10)
+            b.configure(bg=tonal, fg=br["ac1"],
+                        activebackground=self._blendc(uibg, br["ac1"], 0.30),
+                        activeforeground=br["ac1"],
+                        disabledforeground=self._blendc(fg, uibg, 0.6),
+                        highlightthickness=2, highlightbackground=uibg,
+                        highlightcolor=br["ac3"])
+            b._rest_bg = tonal
+            b._hot_bg = self._blendc(uibg, br["ac1"], 0.20)
+            b._rest_fg = br["ac1"]
+        else:                            # tertiary: quiet text button
+            muted = self._blendc(fg, uibg, 0.35)
+            b.configure(bg=uibg, fg=muted, activebackground=uibg,
+                        activeforeground=br["ac1"],
+                        disabledforeground=self._blendc(fg, uibg, 0.6),
+                        highlightthickness=1, highlightbackground=uibg,
+                        highlightcolor=br["ac3"])
+            b._rest_bg, b._hot_bg = uibg, uibg
+            b._rest_fg = muted
+
+    def _hover_brand_button(self, b, hot):
+        try:
+            if str(b["state"]) == "disabled":
+                return
+            if getattr(b, "_tier", "primary") == "tertiary":
+                b.configure(fg=(self._brand()["ac1"] if hot
+                                else getattr(b, "_rest_fg", None)
+                                or self._theme_palette()[1]))
+                return
+            b.configure(bg=(getattr(b, "_hot_bg", None) if hot else
+                            getattr(b, "_rest_bg", None)) or b["bg"])
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _brand_button(self, parent, text, command, big=False,
+                      tier="primary", **bkw):
+        """A branded action button we fully own (sv_ttk's accent visuals are
+        image-drawn and cannot be recolored). Tiers per the button plan:
+        primary = filled ac1 + bold (the ONE main action of a region);
+        secondary = outlined, ac1 text on chrome; tertiary = quiet text.
+        Every tier has hover, pressed, keyboard-focus ring (ac3) and a
+        distinct disabled look; hierarchy is carried by shape + weight,
+        never color alone."""
         b = tk.Button(parent, text=text, command=command, relief="flat",
-                      bd=0, cursor="hand2", bg=br["ac1"], fg=_txt,
-                      activebackground=br["hov"], activeforeground=_txt,
-                      disabledforeground="#cfcfcf",
-                      font=self._F(1, "bold"),
-                      padx=14, pady=5)
+                      bd=0, cursor="hand2",
+                      font=self._F(1, "bold" if tier == "primary"
+                                   else "normal"),
+                      padx=(14 if tier == "primary" else 10),
+                      pady=(5 if tier == "primary" else 4), **bkw)
+        b._tier = tier
+        self._tint_brand_button(b, self._brand())
         if not hasattr(self, "_brand_btns"):
             self._brand_btns = []
         self._brand_btns.append(b)
-        b.bind("<Enter>", lambda e: (str(b["state"]) != "disabled"
-                                     and b.configure(bg=self._brand()["hov"])))
-        b.bind("<Leave>", lambda e: (str(b["state"]) != "disabled"
-                                     and b.configure(bg=self._brand()["ac1"])))
+        b.bind("<Enter>", lambda e: self._hover_brand_button(b, True))
+        b.bind("<Leave>", lambda e: self._hover_brand_button(b, False))
         return b
 
     def _hairline(self):
         """(ground, border) for the flat cards: border = a 32% blend of
-        the text color into the panel ground."""
+        the text color into the panel ground (full fg in High Contrast)."""
         uibg, fg, _fl, _pb, _pf = self._theme_palette()
+        if self.theme_mode.get() == "highcontrast":
+            return uibg, fg
         try:
             r1, g1, b1 = self.root.winfo_rgb(uibg)
             r2, g2, b2 = self.root.winfo_rgb(fg)
@@ -2270,7 +2399,120 @@ class App:
             d.rectangle([scx - sr, yy, scx + sr, yy + max(1, int(H * 0.05))],
                         fill=band)
 
+    def _collapsible_card(self, card, key):
+        """Make a left-panel card collapsible: clicking its title header
+        toggles (drawn caret at the END of the title); state persists in
+        settings[key]. Returns the frame the builder should pack the
+        card content into."""
+        wrap = ttk.Frame(card.body)
+        wrap.pack(fill="both", expand=True)
+        header = card._title
+        caret = self._lbl(header, text="")
+        caret.pack(side="left", padx=(6, 0))
+        d = getattr(self, "_ccards", None)
+        if d is None:
+            d = self._ccards = {}
+        d[key] = {"card": card, "wrap": wrap, "caret": caret}
+        for w in [header] + list(header.winfo_children()):
+            w.configure(cursor="hand2")
+            w.bind("<Button-1>", lambda e, k=key: self._card_toggle(k))
+        if self.settings.get(key):
+            self.root.after_idle(lambda k=key: self._card_toggle(k, True))
+        else:
+            self.root.after_idle(lambda k=key: self._card_caret(k))
+        return wrap
+
+    def _card_toggle(self, key, collapse=None):
+        rec = getattr(self, "_ccards", {}).get(key)
+        if not rec:
+            return
+        wrap, card = rec["wrap"], rec["card"]
+        shown = bool(wrap.winfo_manager())
+        want = shown if collapse is None else collapse
+        if want and shown:
+            wrap.pack_forget()
+        elif not want and not shown:
+            wrap.pack(fill="both", expand=True)
+        collapsed = not bool(wrap.winfo_manager())
+        try:
+            card.body.configure(height=1 if collapsed else 0)
+            if card.grow != "x":
+                # an expanding card must also stop absorbing pane space
+                if collapsed:
+                    card.pack_configure(expand=False, fill="x")
+                    card.configure(height=card._top_inset() + card.pad)
+                else:
+                    card.pack_configure(expand=True, fill="both")
+                    card.configure(height=1)
+            card._refresh()
+        except tk.TclError:
+            pass
+        self.settings[key] = collapsed
+        self._card_caret(key)
+        self._save_settings()
+
+    def _card_caret(self, key):
+        rec = getattr(self, "_ccards", {}).get(key)
+        if not rec:
+            return
+        ic = getattr(self, "_icons", {})
+        img = ic.get("caret_closed" if self.settings.get(key)
+                     else "caret_open")
+        try:
+            if img is not None:
+                rec["caret"].configure(image=img)
+        except tk.TclError:
+            pass
+
+    def _toggle_qa(self, collapse=None):
+        """Collapse / expand the Quick Access card; the title stays on the
+        border as the click target. Persists in settings."""
+        w = getattr(self, "_qa_wrap", None)
+        if w is None:
+            return
+        shown = bool(w.winfo_manager())
+        want_collapse = shown if collapse is None else collapse
+        if want_collapse and shown:
+            w.pack_forget()
+        elif not want_collapse and not shown:
+            w.pack(fill="x")
+        collapsed = not bool(w.winfo_manager())
+        card = getattr(self, "_qa_card", None)
+        if card is not None:
+            try:
+                # an EMPTY frame keeps its last requested size, so pin the
+                # body to 1px when collapsed / natural when expanded and
+                # re-fit the card -- the notebook below gets the room back
+                card.body.configure(height=1 if collapsed else 0)
+                card._refresh()
+            except tk.TclError:
+                pass
+        self.settings["qa_collapsed"] = collapsed
+        self._qa_caret()
+        self._save_settings()
+
+    def _qa_caret(self):
+        """Show the QA collapse state with the drawn caret icons."""
+        t = getattr(self, "_qa_title", None)
+        if t is None:
+            return
+        ic = getattr(self, "_icons", {})
+        img = ic.get("caret_closed" if self.settings.get("qa_collapsed")
+                     else "caret_open")
+        try:
+            if img is not None:
+                t.configure(image=img, compound="left", padx=4)
+        except tk.TclError:
+            pass
+
     def _toggle_dark(self):
+        self._theming = True
+        try:
+            self._toggle_dark_inner()
+        finally:
+            self._theming = False
+
+    def _toggle_dark_inner(self):
         self._init_theme()
         self._center_titles()
         self._recolor_tk()
@@ -2310,6 +2552,17 @@ class App:
                 return auto
         return (res(getattr(self, "axis_color", None)),
                 res(getattr(self, "text_color", None)))
+
+    def _page_dark(self):
+        """True when the EFFECTIVE plot page is dark (theme bg on + a dark
+        theme). Pane/grid auto-shades must key on the page, not the theme:
+        a dark accent theme with 'theme bg' off has a WHITE page."""
+        try:
+            from matplotlib.colors import to_rgb
+            r, g, b = to_rgb(self._mpl_colors()[0])
+            return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 0.5
+        except Exception:
+            return bool(self.dark_mode.get())
 
     def _mpl_colors(self):
         u, f, _fl, _pb, _pf = self._theme_palette()
@@ -2635,6 +2888,8 @@ class App:
         uibg, fg, _fld, _pb, _pf = self._theme_palette()
         accent = self._raw_banner_accent()
         muted = "#9aa0a6" if self.dark_mode.get() else "#6b7280"
+        if self.theme_mode.get() == "highcontrast":
+            muted = fg
         bar.configure(bg=uibg)
         self._session_tabs = {}
         many = len(self.sessions) > 6      # compress padding when crowded
@@ -2915,6 +3170,8 @@ class App:
                 int((b1 * (1 - t) + b2 * t) / 256))
         except tk.TclError:
             rest = "#9a9a9a"
+        if self.theme_mode.get() == "highcontrast":
+            rest = fg
         return uibg, rest, self._brand().get("ac3", "#C9A227")
 
     def _draw_sash_pill(self, cv, hot=False):
@@ -3068,7 +3325,7 @@ class App:
         self._progress_card = _cpg
         _cpg.pack(fill="x", pady=(2, 4))
         _cpg.set_title(self._lf_header(_cpg, "Progress"))
-        pgf = _cpg.body
+        pgf = self._collapsible_card(_cpg, "pg_collapsed")
         pgbtn = ttk.Frame(pgf); pgbtn.pack(side="bottom", fill="x")
         cl = self._copylog_btn = ttk.Button(pgbtn, text="Copy log",
                                             command=self._copy_log)
@@ -3092,7 +3349,7 @@ class App:
         _cgf = self._card(p, grow="both")
         _cgf.pack(fill="both", expand=True, pady=(2, 4))
         _cgf.set_title(self._lf_header(_cgf, "Guide / notes"))
-        gf = _cgf.body
+        gf = self._collapsible_card(_cgf, "guide_collapsed")
         hdr = ttk.Frame(gf); hdr.pack(fill="x")
         self._lbl(hdr, text="View").pack(side="left")
         _views = list(REF_VIEWS.keys()) + ["My notes"]
@@ -3450,7 +3707,7 @@ class App:
                  "Title & axis labels", "Legend", "Colorbar", "Reference guides",
                  "Smoothing", "Defringe",
                  "Presets & projects", "Traces",
-                 "Export", "Figure"]
+                 "Figure", "Export"]
         by_key = {r["key"]: r for r in getattr(self, "_collapsibles", [])}
         cat_of = getattr(self, "_section_cat", {})
         prev = {}
@@ -3600,6 +3857,30 @@ class App:
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_pane)
         self.canvas.get_tk_widget().pack(side="top", fill="both", expand=True)
+        # debounce the backend's per-<Configure> full redraw: dragging a
+        # sash / hiding a pane fires a storm of Configure events and each
+        # one repainted the whole figure (75+ ms). One repaint now runs
+        # shortly after the LAST resize; the panes themselves stay instant.
+        self._cfg_evt = None
+        self._cfg_after = None
+
+        def _run_resize():
+            self._cfg_after = None
+            evt = self._cfg_evt
+            if evt is not None:
+                try:
+                    self.canvas.resize(evt)
+                except Exception:
+                    pass
+
+        def _debounced_resize(evt):
+            self._cfg_evt = evt
+            if self._cfg_after is None:
+                try:
+                    self._cfg_after = self.root.after(80, _run_resize)
+                except tk.TclError:
+                    pass
+        self.canvas.get_tk_widget().bind("<Configure>", _debounced_resize)
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
@@ -4391,7 +4672,7 @@ class App:
             ("Style", ["Colors & colormap", "Fonts", "Title & axis labels", "Legend", "Colorbar", "Reference guides"]),
             ("Data", ["Smoothing", "Defringe",
                       "Traces"]),
-            ("Export", ["Presets & projects", "Export", "Figure"]),
+            ("Export", ["Presets & projects", "Figure", "Export"]),
         ]
         for _label, _titles in _tabspec:
             self._tab_frames[_label] = self._make_scroll_page(self.rnotebook,
@@ -4563,12 +4844,12 @@ class App:
         _ysc.bind("<<ComboboxSelected>>", lambda e: self._redraw())
         Tooltip(_ysc, "Y (absorbance) axis scale: linear or logarithmic.")
         lbr = ttk.Frame(lim); lbr.pack(fill="x", pady=(4, 1))
-        atck = ttk.Checkbutton(lbr, text="Auto", variable=self.autoscale,
-                               command=self._redraw)
-        atck.pack(side="left", padx=(0, 8))
-        Tooltip(atck, "Fit the axes to the data on every redraw. Zooming, "
-                      "typing a limit, or Apply limits turns this off so your "
-                      "values stick.")
+        atbtn = ttk.Button(lbr, text="Auto fit", command=self._reset_axes)
+        atbtn.pack(side="left", padx=(0, 8))
+        Tooltip(atbtn, "Fit the axes to the data: clears the limit boxes "
+                       "and re-enables auto-fit on every redraw (zooming, "
+                       "typing a limit, or Apply limits turns that off "
+                       "again).")
         ttk.Button(lbr, text="Apply limits", command=self._apply_limits).pack(
             side="left", padx=(0, 4))
         rax = ttk.Button(lbr, text="Reset axes", command=self._reset_axes)
@@ -4592,6 +4873,38 @@ class App:
                         variable=self.dash_decomp,
                         command=self._redraw).pack(anchor="w", pady=(4, 1))
         self.df_compare = tk.BooleanVar(value=False)
+        inr = ttk.Frame(twod); inr.pack(fill="x", pady=(2, 1))
+        self.inset_on = tk.BooleanVar()
+        _inc = ttk.Checkbutton(inr, text="Inset zoom",
+                               variable=self.inset_on,
+                               command=self._redraw)
+        _inc.pack(side="left")
+        self.inset_x1 = tk.StringVar(); self.inset_x2 = tk.StringVar()
+        _ie1 = ttk.Entry(inr, textvariable=self.inset_x1, width=6)
+        _ie1.pack(side="left", padx=(8, 0))
+        self._lbl(inr, text="to").pack(side="left", padx=(4, 0))
+        _ie2 = ttk.Entry(inr, textvariable=self.inset_x2, width=6)
+        _ie2.pack(side="left", padx=(4, 0))
+        for _e in (_ie1, _ie2):
+            _e.bind("<Return>", lambda e: self._redraw())
+            _e.bind("<FocusOut>", lambda e: self._redraw())
+        inr2 = ttk.Frame(twod); inr2.pack(fill="x", pady=(0, 1))
+        self._lbl(inr2, text="  at", width=6).pack(side="left")
+        self.inset_loc = tk.StringVar(value="upper right")
+        _ilc = ttk.Combobox(inr2, textvariable=self.inset_loc,
+                            state="readonly", width=11,
+                            values=["upper right", "upper left",
+                                    "lower left", "lower right"])
+        _ilc.pack(side="left")
+        _ilc.bind("<<ComboboxSelected>>", lambda e: self._redraw())
+        self._lbl(inr2, text=" size").pack(side="left", padx=(6, 0))
+        self.inset_size = tk.DoubleVar(value=0.32)
+        ttk.Spinbox(inr2, from_=0.15, to=0.5, increment=0.05,
+                    textvariable=self.inset_size, width=5,
+                    command=self._redraw).pack(side="left", padx=(4, 0))
+        Tooltip(inr, "Magnify an X range (e.g. an absorption edge) in a "
+                     "small corner panel; the zoomed region is outlined "
+                     "on the main plot. 2D overlay and stacked.")
         dfcc = ttk.Checkbutton(twod, text="Defringe compare (selected trace)",
                                variable=self.df_compare,
                                command=self._redraw)
@@ -4665,8 +4978,34 @@ class App:
         self._lbl(ln2, text="Tick width", width=12).pack(side="left")
         ttk.Entry(ln2, textvariable=self.tick_width, width=5).pack(side="left")
         self._lbl(ln2, text="Label font").pack(side="left", padx=(14, 0))
-        ttk.Spinbox(ln2, from_=6, to=24, textvariable=self.tick_fs, width=4,
+        ttk.Spinbox(ln2, from_=2, to=72, textvariable=self.tick_fs, width=4,
                     command=self._redraw).pack(side="left", padx=(6, 0))
+        fmr = ttk.Frame(at); fmr.pack(fill="x", pady=(4, 1))
+        self._lbl(fmr, text="X format", width=12).pack(side="left")
+        self.xtickfmt = tk.StringVar(value="auto")
+        _xfc = ttk.Combobox(fmr, textvariable=self.xtickfmt, state="readonly",
+                            width=8, values=["auto", "0", "0.0", "0.00",
+                                             "0.000", "scientific"])
+        _xfc.pack(side="left")
+        self._lbl(fmr, text=" Y format").pack(side="left", padx=(8, 0))
+        self.ytickfmt = tk.StringVar(value="auto")
+        _yfc = ttk.Combobox(fmr, textvariable=self.ytickfmt, state="readonly",
+                            width=8, values=["auto", "0", "0.0", "0.00",
+                                             "0.000", "scientific"])
+        _yfc.pack(side="left", padx=(4, 0))
+        for _c in (_xfc, _yfc):
+            _c.bind("<<ComboboxSelected>>", lambda e: self._redraw())
+        Tooltip(fmr, "Tick number format: fixed decimals (0.00 = two "
+                     "places) or scientific notation. 2D linear axes; "
+                     "'auto' = matplotlib's choice.")
+        rtr = ttk.Frame(at); rtr.pack(fill="x", pady=(0, 1))
+        self._lbl(rtr, text="Rotate X", width=12).pack(side="left")
+        self.xtick_rot = tk.IntVar(value=0)
+        ttk.Spinbox(rtr, from_=0, to=90, increment=15,
+                    textvariable=self.xtick_rot, width=4,
+                    command=self._redraw).pack(side="left")
+        self._lbl(rtr, text="deg").pack(side="left", padx=(4, 0))
+        Tooltip(rtr, "Rotate the X tick labels (dense wavenumber ticks).")
         atb = ttk.Frame(at); atb.pack(fill="x", pady=(4, 1))
         ttk.Button(atb, text="Apply ticks", command=self._redraw).pack(side="left")
         ttk.Button(atb, text="Auto", command=self._auto_ticks).pack(side="left",
@@ -5074,6 +5413,7 @@ class App:
         Tooltip(syncb, "Copy the vertical line style (color, pattern, width) "
                        "onto the horizontal lines.")
 
+
         # --- Title / labels / legend ---
         lg = self._group(r, "Title & axis labels")
         self.title_v, self.xlabel_v, self.ylabel_v = (tk.StringVar(),
@@ -5101,7 +5441,7 @@ class App:
             en.bind("<Return>", lambda ev: self._redraw())
             en.bind("<KeyRelease>", lambda ev, vv=v: self._mark_label_edited(vv))
             en.bind("<Button-3>", lambda ev, vv=v: self._reset_field(vv, "label"))
-            ttk.Spinbox(row, from_=6, to=28, textvariable=_fsmap[lbl], width=3,
+            ttk.Spinbox(row, from_=2, to=72, textvariable=_fsmap[lbl], width=3,
                         command=self._redraw).pack(side="left", padx=(6, 0))
         pos1 = ttk.Frame(lg); pos1.pack(fill="x", pady=(4, 1))
         self._lbl(pos1, text="Title pos", width=9).pack(side="left")
@@ -5109,6 +5449,9 @@ class App:
         ttk.Combobox(pos1, textvariable=self.title_loc, state="readonly",
                      width=7, values=["left", "center", "right"]
                      ).pack(side="left")
+        self.title_loc.trace_add(
+            "write", lambda *a: getattr(self, "title_xy_pin",
+                                        tk.BooleanVar()).set(False))
         self.title_loc.trace_add("write", lambda *a: self._redraw())
         self._lbl(pos1, text=" pad").pack(side="left", padx=(6, 0))
         self.title_pad = tk.StringVar()
@@ -5118,6 +5461,21 @@ class App:
         tpe.bind("<FocusOut>", lambda e: self._redraw())
         Tooltip(pos1, "Title alignment, and its gap above the axes in "
                       "points (blank = default).")
+        pos1b = ttk.Frame(lg); pos1b.pack(fill="x", pady=(0, 1))
+        self._lbl(pos1b, text="Title X", width=9).pack(side="left")
+        self.title_x = tk.StringVar(); self.title_y = tk.StringVar()
+        self.title_xy_pin = tk.BooleanVar(value=False)
+        _tex = ttk.Entry(pos1b, textvariable=self.title_x, width=7)
+        _tex.pack(side="left")
+        self._lbl(pos1b, text="Y", width=3, anchor="e").pack(side="left")
+        _tey = ttk.Entry(pos1b, textvariable=self.title_y, width=7)
+        _tey.pack(side="left", padx=(6, 0))
+        self._reg_xy("title", self.title_x, self.title_y,
+                     _tex, _tey, self.title_xy_pin)
+        Tooltip(pos1b, "The title position in axes fractions (y>1 is "
+                       "above the axes). Live-updates; type both values "
+                       "to pin a custom spot, blank one to follow the "
+                       "Title pos setting again.")
         pos2 = ttk.Frame(lg); pos2.pack(fill="x", pady=(0, 1))
         self._lbl(pos2, text="X pos", width=9).pack(side="left")
         self.xlabel_loc = tk.StringVar(value="center")
@@ -5132,7 +5490,21 @@ class App:
                      ).pack(side="left", padx=(2, 0))
         self.ylabel_loc.trace_add("write", lambda *a: self._redraw())
         Tooltip(pos2, "Where the X / Y axis labels sit along their axes "
-                      "(2D plots).")
+                      "(2D and 3D).")
+        fnr = ttk.Frame(lg); fnr.pack(fill="x", pady=(4, 1))
+        self._lbl(fnr, text="Footnote", width=9).pack(side="left")
+        self.footnote_v = tk.StringVar()
+        _fne = ttk.Entry(fnr, textvariable=self.footnote_v)
+        _fne.pack(side="left", fill="x", expand=True)
+        _fne.bind("<Return>", lambda e: self._redraw())
+        _fne.bind("<FocusOut>", lambda e: self._redraw())
+        self.footnote_fs = tk.IntVar(value=7)
+        ttk.Spinbox(fnr, from_=2, to=72, textvariable=self.footnote_fs,
+                    width=4, command=self._redraw).pack(side="left",
+                                                        padx=(6, 0))
+        Tooltip(fnr, "Small annotation stamped at the bottom-left of the "
+                     "page (sample notes, run ID, 'preliminary'...). "
+                     "Exports with the figure; 2D and 3D.")
         lg = self._group(r, "Legend")
         self.legend_on = tk.BooleanVar(value=True)
         lgck = ttk.Checkbutton(lg, text="Show legend", variable=self.legend_on,
@@ -5144,7 +5516,35 @@ class App:
         self.legend_loc = tk.StringVar(value="best")
         ttk.Combobox(lr, textvariable=self.legend_loc, values=LEGEND_LOCS,
                      state="readonly").pack(side="left", fill="x", expand=True)
+        self.legend_loc.trace_add(
+            "write", lambda *a: getattr(self, "legend_xy_pin",
+                                        tk.BooleanVar()).set(False))
         self.legend_loc.trace_add("write", lambda *a: self._redraw())
+        lxy = ttk.Frame(lg); lxy.pack(fill="x", pady=(2, 1))
+        self._lbl(lxy, text="X", width=9).pack(side="left")
+        self.legend_x = tk.StringVar(); self.legend_y = tk.StringVar()
+        self.legend_xy_pin = tk.BooleanVar(value=False)
+        _lex = ttk.Entry(lxy, textvariable=self.legend_x, width=7)
+        _lex.pack(side="left")
+        self._lbl(lxy, text="Y", width=3, anchor="e").pack(side="left")
+        _ley = ttk.Entry(lxy, textvariable=self.legend_y, width=7)
+        _ley.pack(side="left", padx=(6, 0))
+        self._reg_xy("legend", self.legend_x, self.legend_y,
+                     _lex, _ley, self.legend_xy_pin)
+        self.legend_autofit = tk.BooleanVar(value=True)
+        _laf = ttk.Checkbutton(lg, text="Auto-fit oversized legend",
+                               variable=self.legend_autofit,
+                               command=self._redraw)
+        _laf.pack(anchor="w", pady=(2, 1))
+        Tooltip(_laf, "On export (and in the WYSIWYG preview), reflow a "
+                      "legend that will not fit the page: more columns, "
+                      "then a smaller font; the values used are written "
+                      "back into this panel. Off = your settings are used "
+                      "exactly as typed.")
+        Tooltip(lxy, "The legend box CENTER in axes fractions (0-1). "
+                     "Live-updates as the legend moves; type both values "
+                     "to pin a custom spot, blank one (or change "
+                     "Location) to follow automatically again.")
         lsw = ttk.Frame(lg); lsw.pack(fill="x", pady=(4, 1))
         self._lbl(lsw, text="Swatch", width=9).pack(side="left")
         self.legend_swatch = tk.StringVar(value="color box")
@@ -5156,14 +5556,29 @@ class App:
                      "block per trace (easy to read, matches the 3D legend); "
                      "'line' shows the artist itself (thin line).")
         self.legend_direct = tk.BooleanVar(value=False)
-        ldc = ttk.Checkbutton(lg, text="Direct labels at curves (no box)",
+        ldc = ttk.Checkbutton(lg, text="Direct labels at curves",
                               variable=self.legend_direct,
                               command=self._redraw)
         ldc.pack(anchor="w", pady=(2, 1))
-        Tooltip(ldc, "Label every curve at its right end with its pressure, "
-                     "colored like the trace, instead of a legend box. Works "
-                     "in 2D overlay, 2D stacked, and 3D ridge; uses the "
-                     "legend font size.")
+        Tooltip(ldc, "Label every curve at its right end with its pressure "
+                     "instead of a legend box. Works in 2D overlay, 2D "
+                     "stacked, and 3D ridge; size and color below.")
+        ldr = ttk.Frame(lg); ldr.pack(fill="x", pady=(0, 1))
+        self._lbl(ldr, text="  Size", width=9).pack(side="left")
+        self.direct_fs = tk.IntVar(value=9)
+        ttk.Spinbox(ldr, from_=2, to=72, textvariable=self.direct_fs,
+                    width=4, command=self._redraw).pack(side="left")
+        self._lbl(ldr, text="  Color").pack(side="left", padx=(8, 0))
+        self.direct_color = tk.StringVar(value="trace")
+        _dcc = ttk.Combobox(ldr, textvariable=self.direct_color, width=8,
+                            values=["trace", "black", "white", "gray"])
+        _dcc.pack(side="left", padx=(4, 0))
+        _dcc.bind("<<ComboboxSelected>>", lambda e: self._redraw())
+        _dcc.bind("<Return>", lambda e: self._redraw())
+        _dcc.bind("<FocusOut>", lambda e: self._redraw())
+        Tooltip(ldr, "Direct-label font size and color: 'trace' = each "
+                     "label in its curve's color; or black / white / gray "
+                     "/ any hex like #305090.")
         lr2 = ttk.Frame(lg); lr2.pack(fill="x", pady=(4, 1))
         self._lbl(lr2, text="Columns", width=9).pack(side="left")
         self.legend_cols = tk.IntVar(value=2)
@@ -5171,7 +5586,7 @@ class App:
                     command=self._redraw).pack(side="left")
         self._lbl(lr2, text="Font size").pack(side="left", padx=(14, 0))
         self.legend_fs = tk.IntVar(value=9)
-        ttk.Spinbox(lr2, from_=6, to=24, textvariable=self.legend_fs, width=4,
+        ttk.Spinbox(lr2, from_=2, to=72, textvariable=self.legend_fs, width=4,
                     command=self._redraw).pack(side="left", padx=(6, 0))
         lr3 = ttk.Frame(lg); lr3.pack(fill="x", pady=(4, 1))
         self._lbl(lr3, text="Title", width=9).pack(side="left")
@@ -5182,7 +5597,7 @@ class App:
         lte.bind("<FocusOut>", lambda e: self._redraw())
         self._lbl(lr3, text="Font size").pack(side="left", padx=(14, 0))
         self.legend_title_fs = tk.IntVar(value=10)
-        ttk.Spinbox(lr3, from_=6, to=24, textvariable=self.legend_title_fs,
+        ttk.Spinbox(lr3, from_=2, to=72, textvariable=self.legend_title_fs,
                     width=4, command=self._redraw).pack(side="left", padx=(6, 0))
         Tooltip(lte, "Optional heading shown above the legend entries. Leave "
                      "blank for no title.")
@@ -5239,7 +5654,7 @@ class App:
         self.cbar_label = tk.StringVar(value="Pressure (GPa)")
         self.cbar_label_fs = tk.IntVar(value=11)
         self.cbar_tick_fs = tk.IntVar(value=9)
-        self.cbar_orient = tk.StringVar(value="vertical")
+        self.cbar_orient = tk.StringVar(value="right")
         self.cbar_width = tk.DoubleVar(value=0.05)
         self.cbar_nticks = tk.IntVar(value=0)
         cb1 = ttk.Frame(cbarg); cb1.pack(fill="x", pady=(4, 1))
@@ -5249,17 +5664,39 @@ class App:
         cble.bind("<Return>", lambda e: self._redraw())
         cble.bind("<FocusOut>", lambda e: self._redraw())
         cb2 = ttk.Frame(cbarg); cb2.pack(fill="x", pady=(4, 1))
-        self._lbl(cb2, text="Orientation", width=11).pack(side="left")
-        ttk.Combobox(cb2, textvariable=self.cbar_orient, state="readonly",
-        values=["vertical", "horizontal"]).pack(side="left",
-                                                             fill="x", expand=True)
+        self._lbl(cb2, text="Location", width=11).pack(side="left")
+        _cbloc = ttk.Combobox(cb2, textvariable=self.cbar_orient,
+                              state="readonly",
+                              values=["right", "left", "top", "bottom"])
+        _cbloc.pack(side="left", fill="x", expand=True)
+        Tooltip(_cbloc, "Where the colorbar sits: right / left (vertical) "
+                        "or top / bottom (flat).")
+        self.cbar_orient.trace_add(
+            "write", lambda *a: getattr(self, "cbar_xy_pin",
+                                        tk.BooleanVar()).set(False))
         self.cbar_orient.trace_add("write", lambda *a: self._redraw())
+        cbxy = ttk.Frame(cbarg); cbxy.pack(fill="x", pady=(2, 1))
+        self._lbl(cbxy, text="X", width=11).pack(side="left")
+        self.cbar_x = tk.StringVar(); self.cbar_y = tk.StringVar()
+        self.cbar_xy_pin = tk.BooleanVar(value=False)
+        _cex = ttk.Entry(cbxy, textvariable=self.cbar_x, width=7)
+        _cex.pack(side="left")
+        self._lbl(cbxy, text="Y", width=3, anchor="e").pack(side="left")
+        _cey = ttk.Entry(cbxy, textvariable=self.cbar_y, width=7)
+        _cey.pack(side="left", padx=(6, 0))
+        self._reg_xy("cbar", self.cbar_x, self.cbar_y,
+                     _cex, _cey, self.cbar_xy_pin)
+        Tooltip(cbxy, "The bar CENTER in figure fractions (0-1). "
+                      "Live-updates; type both values to pin a custom "
+                      "spot, blank one (or change Location) to follow "
+                      "automatically again. Location still sets the "
+                      "orientation and tick side.")
         cb3 = ttk.Frame(cbarg); cb3.pack(fill="x", pady=(4, 1))
         self._lbl(cb3, text="Label font", width=11).pack(side="left")
-        ttk.Spinbox(cb3, from_=6, to=24, textvariable=self.cbar_label_fs, width=4,
+        ttk.Spinbox(cb3, from_=2, to=72, textvariable=self.cbar_label_fs, width=4,
                     command=self._redraw).pack(side="left")
         self._lbl(cb3, text="Tick font").pack(side="left", padx=(14, 0))
-        ttk.Spinbox(cb3, from_=6, to=24, textvariable=self.cbar_tick_fs, width=4,
+        ttk.Spinbox(cb3, from_=2, to=72, textvariable=self.cbar_tick_fs, width=4,
                     command=self._redraw).pack(side="left", padx=(6, 0))
         cb4 = ttk.Frame(cbarg); cb4.pack(fill="x", pady=(4, 1))
         self._lbl(cb4, text="Thickness", width=11).pack(side="left")
@@ -5283,6 +5720,39 @@ class App:
         ttk.Combobox(fr, textvariable=self.font_family, values=FONTS,
                      state="readonly").pack(side="left", fill="x", expand=True)
         self.font_family.trace_add("write", lambda *a: self._redraw())
+        (self.title_bold, self.title_italic, self.axlabel_bold,
+         self.axlabel_italic, self.tick_bold, self.tick_italic,
+         self.legend_bold, self.legend_italic, self.cbar_bold,
+         self.cbar_italic) = (tk.BooleanVar() for _ in range(10))
+        bi1 = ttk.Frame(ft); bi1.pack(fill="x", pady=(4, 1))
+        self._lbl(bi1, text="Bold", width=9).pack(side="left")
+        for _t, _v in (("Title", self.title_bold),
+                       ("Labels", self.axlabel_bold),
+                       ("Ticks", self.tick_bold),
+                       ("Legend", self.legend_bold),
+                       ("Bar", self.cbar_bold)):
+            ttk.Checkbutton(bi1, text=_t, variable=_v,
+                            command=self._redraw).pack(side="left",
+                                                       padx=(0, 4))
+        bi2 = ttk.Frame(ft); bi2.pack(fill="x", pady=(0, 1))
+        self._lbl(bi2, text="Italic", width=9).pack(side="left")
+        for _t, _v in (("Title", self.title_italic),
+                       ("Labels", self.axlabel_italic),
+                       ("Ticks", self.tick_italic),
+                       ("Legend", self.legend_italic),
+                       ("Bar", self.cbar_italic)):
+            ttk.Checkbutton(bi2, text=_t, variable=_v,
+                            command=self._redraw).pack(side="left",
+                                                       padx=(0, 4))
+        Tooltip(bi1, "Bold per text element (2D and 3D). 'Bar' = the "
+                     "colorbar label and its tick numbers.")
+        Tooltip(bi2, "Italic per text element. NOTE: needs a font with an "
+                     "italic face -- the default Jost has none; pick Arial "
+                     "or Segoe UI in Fonts (journal presets set Arial). "
+                     "Tip: $...$ mathtext in any label box gives "
+                     "sub/superscripts and Greek "
+                     "(e.g. Fe$^{2+}$, $\\lambda$).")
+
         self.font_size = tk.IntVar(value=10)   # base size; per-item sizes are
                                                # set next to each text control
         self._lbl(ft, text="(text sizes are set next to each item)",
@@ -5376,10 +5846,59 @@ class App:
                      "and height (Figure box), so you see the true printed "
                      "proportions and text size before saving. Off = fill "
                      "the window.")
+        af = ttk.Frame(ex); af.pack(fill="x", pady=(2, 0))
+        self._lbl(af, text="Also save").pack(side="left")
+        self.exp_also_png = tk.BooleanVar(); self.exp_also_pdf = tk.BooleanVar()
+        self.exp_also_svg = tk.BooleanVar(); self.exp_also_tif = tk.BooleanVar()
+        for _t, _v in (("PNG", self.exp_also_png), ("PDF", self.exp_also_pdf),
+                       ("SVG", self.exp_also_svg), ("TIF", self.exp_also_tif)):
+            ttk.Checkbutton(af, text=_t, variable=_v).pack(side="left",
+                                                           padx=(6, 0))
+        Tooltip(af, "One Save writes every ticked format next to the file "
+                    "you name (same base name). PDF/SVG are vector; TIF is "
+                    "high-res raster for submission systems.")
+        ef = ttk.Frame(ex); ef.pack(fill="x", pady=(2, 0))
+        self.exp_editable = tk.BooleanVar(value=True)
+        _edc = ttk.Checkbutton(ef, text="Editable text",
+                               variable=self.exp_editable)
+        _edc.pack(side="left")
+        Tooltip(_edc, "Vector exports (PDF/SVG/EPS) embed real TrueType "
+                      "text (fonttype 42): journals accept it and "
+                      "Illustrator/Inkscape can edit the labels. Off = "
+                      "text outlined as paths (exact shapes, not "
+                      "editable).")
+        self.exp_gray = tk.BooleanVar()
+        _gyc = ttk.Checkbutton(ef, text="Grayscale copy",
+                               variable=self.exp_gray)
+        _gyc.pack(side="left", padx=(10, 0))
+        Tooltip(_gyc, "Also write <name>_grayscale.png -- the "
+                      "print-survival check: do the curves still "
+                      "distinguish without color?")
+        self.exp_open = tk.BooleanVar()
+        _opc = ttk.Checkbutton(ef, text="Open after",
+                               variable=self.exp_open)
+        _opc.pack(side="left", padx=(10, 0))
+        Tooltip(_opc, "Open the saved file in its default viewer.")
+        nf = ttk.Frame(ex); nf.pack(fill="x", pady=(2, 0))
+        self._lbl(nf, text="Name").pack(side="left")
+        self.exp_name_tpl = tk.StringVar(value="{tab}_{mode}_{date}")
+        _nfe = ttk.Entry(nf, textvariable=self.exp_name_tpl)
+        _nfe.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        Tooltip(_nfe, "Suggested file name for Save plot. Tokens: {tab} "
+                      "{mode} {wf} {preset} {cmap} {date}.")
         ttk.Button(ex, text="Save plot...", command=self._save_plot).pack(
             fill="x", pady=(4, 0))
-        ttk.Button(ex, text="Batch export PNG (one per shown trace)...",
-                   command=self._batch_export).pack(fill="x", pady=(4, 0))
+        bf = ttk.Frame(ex); bf.pack(fill="x", pady=(4, 0))
+        _bbt = ttk.Button(bf, text="Batch export (one per shown trace)...",
+                          command=self._batch_export)
+        _bbt.pack(side="left", fill="x", expand=True)
+        Tooltip(_bbt, "Solo each shown trace on the CURRENT styled figure "
+                      "(mode, labels, fonts, journal size) and save one "
+                      "file per trace in the chosen format.")
+        self.batch_fmt = tk.StringVar(value="png")
+        ttk.Combobox(bf, textvariable=self.batch_fmt, state="readonly",
+                     width=4, values=["png", "pdf", "svg", "tif"]
+                     ).pack(side="left", padx=(6, 0))
         cr2 = ttk.Frame(ex); cr2.pack(fill="x")
         self.crop_on = tk.BooleanVar()
         ttk.Checkbutton(cr2, text="Crop", variable=self.crop_on).pack(side="left")
@@ -5418,9 +5937,18 @@ class App:
         _qac.pack(side="top", fill="x", padx=6, pady=(2, 6),
                   before=self.rnotebook)
         bar = _qac.body
+        self._qa_card = _qac
+        self._qa_wrap = ttk.Frame(bar)
+        self._qa_wrap.pack(fill="x")
         self._qa_title = self._lbl(_qac, text="Quick Access",
                                    font=self._F(1, "bold"))
         _qac.set_title(self._qa_title, anchor="center")
+        self._qa_title.configure(cursor="hand2")
+        self._qa_title.bind("<Button-1>", lambda e: self._toggle_qa())
+        Tooltip(self._qa_title, "Click to collapse / expand Quick Access.")
+        bar = self._qa_wrap
+        if self.settings.get("qa_collapsed"):
+            self.root.after_idle(lambda: self._toggle_qa(True))
         # two compact rows so nothing clips at larger font sizes:
         # row 1 = waterfall + line width; row 2 = the two toggles
         b1 = ttk.Frame(bar); b1.pack(fill="x")
@@ -5876,6 +6404,15 @@ class App:
         # Column widths from each publisher's current author guidelines
         # (2025-2026). Nature/Science/Elsevier require sans-serif (Helvetica/
         # Arial); APS allows serif. Font sizes are FINAL (printed) sizes.
+        # the common 3D conventions of these journals: minimal 3-axes
+        # frame, no background panes or grid, white page, a pressure
+        # colorbar instead of a many-entry legend, standard elev/azim view
+        scene3d = {"wf_mode": "3D ridge", "wf3d_frame": "3 axes",
+                   "wf3d_frame_color": "black", "wf3d_panes": "off",
+                   "grid_on": False, "wf3d_elev": 20.0, "wf3d_azim": -60.0,
+                   "wf3d_zoom": 1.0, "legend_on": False,
+                   "colorbar_on": True, "cbar_orient": "right",
+                   "plot_theme_bg": False}
         return {
             "Nature single (89 mm)":     (3.50, 2.60, "Arial", 8, 7, 7, 0.75, 300),
             "Nature double (183 mm)":    (7.20, 5.40, "Arial", 8, 7, 7, 0.75, 300),
@@ -5888,6 +6425,11 @@ class App:
             "APS 2-col (7.0 in)":        (7.00, 5.00, "DejaVu Serif", 9, 8, 8, 1.0, 300),
             "Elsevier 1-col (90 mm)":    (3.54, 2.70, "Arial", 8, 7, 7, 0.75, 300),
             "Elsevier 2-col (190 mm)":   (7.48, 5.20, "Arial", 8, 7, 7, 0.75, 300),
+            "Nature 3D single (89 mm)":  (3.50, 2.80, "Arial", 8, 7, 7, 0.75, 300, scene3d),
+            "Nature 3D double (183 mm)": (7.20, 5.40, "Arial", 8, 7, 7, 0.75, 300, scene3d),
+            "Science 3D 2-col (12.1 cm)": (4.76, 3.80, "Arial", 8, 7, 7, 0.75, 300, scene3d),
+            "APS 3D 2-col (7.0 in)":     (7.00, 5.25, "DejaVu Serif", 9, 8, 8, 1.0, 300, scene3d),
+            "Clean style (no grid, thin spines)": "CLEAN",
             "square (5 in)":             (5.00, 5.00, None, None, None, None, None, None),
             "wide (10 x 4 in)":          (10.0, 4.00, None, None, None, None, None, None),
         }
@@ -5945,12 +6487,7 @@ class App:
         Tooltip(padr, "Pad: whitespace margin kept around a tight box. "
                       "Face: page background on export ('auto' = current theme, "
                       "'none' = transparent).")
-        jsb = ttk.Button(jf, text="Apply clean style (no grid, thin spines)",
-                         command=self._journal_style)
-        jsb.pack(fill="x", pady=(4, 0))
-        Tooltip(jsb, "Publication-agnostic tidy: no grid, top/right spines "
-                     "hidden, ticks in, minor ticks on. Keeps your current font "
-                     "(a journal preset sets the font for you).")
+
 
     def _apply_journal_preset(self):
         name = self.fig_preset.get()
@@ -5958,7 +6495,12 @@ class App:
         if not p:                       # 'custom' or unknown: keep everything
             self._apply_preview_size()
             return
-        w, h, font, tfs, lfs, kfs, lw, dpi = p
+        if p == "CLEAN":                # tidy pass; size and fonts stay
+            self._journal_style()
+            self._push_undo("journal preset: " + name)
+            return
+        w, h, font, tfs, lfs, kfs, lw, dpi = p[:8]
+        extras = p[8] if len(p) > 8 else None
         self._restoring = True          # set many vars without undo/log spam
         try:
             self.fig_w.set("%.2f" % w); self.fig_h.set("%.2f" % h)
@@ -5977,6 +6519,16 @@ class App:
             if font is not None:        # a real journal (not square/wide): tidy
                 self.grid_on.set(False); self.hide_spines.set(True)
                 self.tick_dir.set("in"); self.minor_ticks.set(True)
+            if extras:                  # 3D presets: apply the scene too
+                for _k, _v in extras.items():
+                    try:
+                        getattr(self, _k).set(_v)
+                    except Exception:
+                        pass
+                try:
+                    self.wf3d_frame_lw.set(float(lw or 0.8))
+                except Exception:
+                    pass
         finally:
             self._restoring = False
         self._apply_preview_size()
@@ -6004,8 +6556,18 @@ class App:
             self.fig.set_size_inches(w, h)
             cw.configure(width=int(round(w * dpi)), height=int(round(h * dpi)))
             cw.pack_configure(fill="none", expand=False, anchor="n")
+            try:                       # accent border = the exact page edge
+                _ac = self._brand()["ac1"]
+                cw.configure(highlightthickness=2, highlightbackground=_ac,
+                             highlightcolor=_ac)
+            except Exception:
+                pass
         else:
             cw.pack_configure(fill="both", expand=True)
+            try:
+                cw.configure(highlightthickness=0)
+            except Exception:
+                pass
         self._redraw()
 
     def _journal_style(self):
@@ -6117,6 +6679,22 @@ class App:
         else:
             messagebox.showinfo("Open output", "No output folder yet.")
 
+    def _ui_breathe(self, min_gap=0.1):
+        """Flush pending idle work at most every min_gap seconds. A raw
+        update_idletasks() per log line synchronously pays for ALL queued
+        layout work (750 ms mid theme-switch) -- and the action log fires
+        on every var change."""
+        if getattr(self, "_theming", False):
+            return                       # theme switch: defer to idle
+        import time as _t
+        now = _t.monotonic()
+        if now - getattr(self, "_breathe_t", 0.0) >= min_gap:
+            self._breathe_t = now
+            try:
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
+
     def _logline(self, msg):
         tag = ()
         s = msg.lstrip()
@@ -6126,7 +6704,7 @@ class App:
             tag = ("logwarn",)
         self.log.insert("end", msg + "\n", tag)
         self.log.see("end")
-        self.root.update_idletasks()
+        self._ui_breathe()
 
     def _dest_folder(self, in_dir, out_dir):
         base = os.path.basename(os.path.normpath(in_dir)) or "run"
@@ -6175,6 +6753,8 @@ class App:
         uibg, _fg, _fl, _pb, _pf = self._theme_palette()
         accent = self._brand()["ac3"]
         muted = "#9aa0a6" if self.dark_mode.get() else "#6b7280"
+        if self.theme_mode.get() == "highcontrast":
+            muted = _fg
         bar.configure(bg=uibg)
         tk.Label(bar, text="Recent runs:", bg=uibg, fg=muted,
                  font=self._F(1)).pack(side="left", padx=(10, 6))
@@ -6259,7 +6839,7 @@ class App:
                 if bg:
                     kw["background"] = bg
                 self.run_state.config(**kw)
-                self.root.update_idletasks()
+                self._ui_breathe()
             except Exception:
                 pass
 
@@ -7085,7 +7665,7 @@ class App:
                         import datetime as _dt
                         engine.write_provenance(
                             os.path.join(dest, "_reduction.provenance.json"), {
-                                "tool": "DAC_QuickLook (Beamline DAC Data Tool)",
+                                "tool": "%s (formerly Beamline DAC Data Tool)" % BRAND["name"],
                                 "version": APP_VERSION,
                                 "written": _dt.datetime.now().isoformat(
                                     timespec="seconds"),
@@ -7930,6 +8510,120 @@ class App:
                        if rgba is not None else h)
         return out
 
+    def _reg_xy(self, key, xvar, yvar, ex, ey, pinvar):
+        """Register an X/Y pair (entries + pin flag). The boxes live-read
+        the drawn position until the user types both values (pin)."""
+        d = getattr(self, "_xy_entries", None)
+        if d is None:
+            d = self._xy_entries = {}
+        d[key] = (xvar, yvar, ex, ey, pinvar)
+        for e in (ex, ey):
+            e.bind("<Return>", lambda _e, k=key: self._xy_commit(k))
+            e.bind("<FocusOut>", lambda _e, k=key: self._xy_commit(k))
+
+    def _xy_commit(self, key):
+        xvar, yvar, _ex, _ey, pin = self._xy_entries[key]
+        pin.set(self._xy_pair(xvar, yvar) is not None)
+        self._redraw()
+
+    def _xy_custom(self, key):
+        """The pinned custom position for key, or None (automatic)."""
+        try:
+            xvar, yvar, _ex, _ey, pin = self._xy_entries[key]
+            if not pin.get():
+                return None
+            return self._xy_pair(xvar, yvar)
+        except (KeyError, AttributeError, tk.TclError):
+            return None
+
+    def _sync_xy_readouts(self, event=None):
+        """Draw-event hook: debounce bursts (pan / orbit redraw
+        continuously) into ONE readout sync shortly after the last
+        render -- the measurement itself costs ~35 ms."""
+        if getattr(self, "_xy_sync_after", None):
+            return
+        try:
+            self._xy_sync_after = self.root.after(250, self._sync_xy_now)
+        except Exception:
+            self._xy_sync_after = None
+
+    def _sync_xy_now(self):
+        """Mirror the ACTUAL drawn positions into the X/Y boxes (skipped
+        for a pinned pair or while the user is typing in one of its
+        boxes), so the panel always tells the truth."""
+        self._xy_sync_after = None
+        event = None
+        ents = getattr(self, "_xy_entries", {})
+        if not ents:
+            return
+        try:
+            focus = self.root.focus_get()
+        except Exception:
+            focus = None
+
+        def put(key, pair):
+            xv, yv, ex, ey, pin = ents[key]
+            try:
+                if focus in (ex, ey) or pin.get():
+                    return
+                if pair is None:
+                    if xv.get() or yv.get():
+                        xv.set(""); yv.set("")
+                    return
+                xs, ys = "%.3f" % pair[0], "%.3f" % pair[1]
+                if xv.get() != xs:
+                    xv.set(xs)
+                if yv.get() != ys:
+                    yv.set(ys)
+            except tk.TclError:
+                pass
+        renderer = getattr(event, "renderer", None)
+        if renderer is None:
+            try:
+                renderer = self.fig.canvas.get_renderer()
+            except Exception:
+                renderer = None
+        if "legend" in ents:
+            pair = None
+            try:
+                leg = self.ax.get_legend()
+                if leg is not None and leg.get_visible() and renderer:
+                    bb = leg.get_window_extent(renderer)
+                    pair = tuple(self.ax.transAxes.inverted().transform(
+                        ((bb.x0 + bb.x1) / 2.0, (bb.y0 + bb.y1) / 2.0)))
+            except Exception:
+                pair = None
+            put("legend", pair)
+        if "title" in ents:
+            pair = None
+            try:
+                if self.title_v.get().strip():
+                    pair = tuple(self.ax.title.get_position())
+            except Exception:
+                pair = None
+            put("title", pair)
+        if "cbar" in ents:
+            pair = None
+            try:
+                cb = getattr(self, "_last_cbar", None)
+                if cb is not None and cb.ax in self.fig.axes:
+                    p = cb.ax.get_position()
+                    pair = ((p.x0 + p.x1) / 2.0, (p.y0 + p.y1) / 2.0)
+            except Exception:
+                pair = None
+            put("cbar", pair)
+
+    def _xy_pair(self, xvar, yvar):
+        """Parse a custom X/Y position pair. Returns (x, y) floats or None
+        when either box is blank/invalid (= automatic placement)."""
+        try:
+            xs, ys = xvar.get().strip(), yvar.get().strip()
+            if not xs or not ys:
+                return None
+            return (float(xs), float(ys))
+        except (ValueError, tk.TclError, AttributeError):
+            return None
+
     def _legend_or_colorbar(self, entries, cmap_name, pmin, pmax,
                             ScalarMappable, Normalize):
         continuous = not colormaps.is_categorical(cmap_name)
@@ -7943,8 +8637,24 @@ class App:
             sm = ScalarMappable(norm=Normalize(pmin, pmax),
                                 cmap=colormaps._continuous_cmap(cmap_name))
             sm.set_array([])
-            cb = self.fig.colorbar(sm, ax=self.ax, **self._cbar_kwargs())
+            _ckw = self._cbar_kwargs()
+            _cxy = self._xy_custom("cbar")
+            if _cxy:
+                _loc = _ckw.get("location", "right")
+                try:
+                    _f = max(0.012, min(0.06, _ckw.pop("fraction", 0.05)
+                                        * 0.5))
+                except Exception:
+                    _f = 0.025
+                _w, _h = ((_f, 0.6) if _loc in ("right", "left")
+                          else (0.44, _f))
+                _cax = self.fig.add_axes([_cxy[0] - _w / 2,
+                                          _cxy[1] - _h / 2, _w, _h])
+                cb = self.fig.colorbar(sm, cax=_cax, **_ckw)
+            else:
+                cb = self.fig.colorbar(sm, ax=self.ax, **_ckw)
             self._style_colorbar(cb)
+            self._last_cbar = cb
             if auto_cbar and not getattr(self, "_cbar_autonote", False):
                 self._cbar_autonote = True
                 self._logline("%d traces on a continuous colormap: showing a "
@@ -7967,21 +8677,42 @@ class App:
             if ttl:
                 kw["title"] = ttl
                 kw["title_fontsize"] = int(self.legend_title_fs.get())
-            if loc == "outside right":
-                leg = self.ax.legend(h, l, bbox_to_anchor=(1.02, 1),
-                                     loc="upper left", **kw)
+            xy = self._xy_custom("legend")
+            if xy:
+                leg = self.ax.legend(h, l, loc="center",
+                                     bbox_to_anchor=xy, **kw)
+            elif loc in LEG_OUTSIDE:
+                _an, _lc = LEG_OUTSIDE[loc]
+                leg = self.ax.legend(h, l, bbox_to_anchor=_an,
+                                     loc=_lc, **kw)
             else:
                 leg = self.ax.legend(h, l, loc=loc, **kw)
             self._style_legend(leg)
+
+    def _direct_label_color(self):
+        """None = per-trace colors; anything else = a fixed color."""
+        try:
+            v = self.direct_color.get().strip()
+        except (AttributeError, tk.TclError):
+            return None
+        if not v or v == "trace":
+            return None
+        from matplotlib.colors import to_rgb
+        try:
+            to_rgb(v)
+            return v
+        except ValueError:
+            return None
 
     def _direct_labels_2d(self, entries):
         """Label each curve at its right end with its pressure (legend
         alternative). Labels are nudged apart vertically so close
         pressures stay readable."""
         try:
-            fs = int(self.legend_fs.get())
-        except (ValueError, tk.TclError):
+            fs = int(self.direct_fs.get())
+        except (ValueError, tk.TclError, AttributeError):
             fs = 9
+        _ovc = self._direct_label_color()
         items = []
         for e in entries:
             line, pv = e[0], e[1]
@@ -8010,7 +8741,7 @@ class App:
         for x, y, txt, col in items:
             self.ax.annotate(txt, (x, y), xytext=(4, 0),
                              textcoords="offset points", fontsize=fs,
-                             color=col, va="center", clip_on=False)
+                             color=_ovc or col, va="center", clip_on=False)
 
     def _make_legend(self, handles, labels):
         """Build a legend on self.ax from the Legend-panel controls and
@@ -8025,20 +8756,125 @@ class App:
             kw["title"] = ttl
             kw["title_fontsize"] = int(self.legend_title_fs.get())
         loc = self.legend_loc.get()
-        if loc == "outside right":
-            leg = self.ax.legend(handles, labels, bbox_to_anchor=(1.02, 1),
-                                 loc="upper left", **kw)
+        xy = self._xy_custom("legend")
+        if xy:
+            leg = self.ax.legend(handles, labels, loc="center",
+                                 bbox_to_anchor=xy, **kw)
+        elif loc in LEG_OUTSIDE:
+            _an, _lc = LEG_OUTSIDE[loc]
+            leg = self.ax.legend(handles, labels, bbox_to_anchor=_an,
+                                 loc=_lc, **kw)
         else:
             leg = self.ax.legend(handles, labels, loc=loc, **kw)
         self._style_legend(leg)
         return leg
+
+    def _autofit_legend(self):
+        """Reflow the legend to fit the CURRENT figure size. Font sizes that
+        look fine on a wide screen canvas dominate a 7-inch journal page;
+        at export (and in the WYSIWYG preview) grow the column count first,
+        then step the font down with compact spacing, rebuilding the legend
+        until it fits inside ~55% of the width and ~92% of the height.
+        Does nothing when the legend already fits."""
+        if (getattr(self, "legend_autofit", None) is not None
+                and not self.legend_autofit.get()):
+            return                       # the user turned auto-fit off
+        leg = self.ax.get_legend() if getattr(self, "ax", None) else None
+        if leg is None or not leg.get_visible():
+            return
+        try:
+            handles = list(getattr(leg, "legend_handles", None)
+                           or getattr(leg, "legendHandles", []))
+            labels = [t.get_text() for t in leg.get_texts()]
+            if not handles or len(handles) != len(labels):
+                return
+            fs = int(self.legend_fs.get())
+            nc = max(1, int(self.legend_cols.get()))
+            fw, fh = self.fig.get_size_inches()
+            loc = self.legend_loc.get()
+            # an outside-right legend never covers data, so it only has to
+            # fit the page; a legend INSIDE the axes must go flat (more
+            # columns, smaller font) so it stops burying the plot.
+            if loc in LEG_OUTSIDE:
+                maxw, maxh = 0.95 * fw, 0.92 * fh
+            elif loc == "best":          # app-managed: keep it off the data
+                maxw, maxh = 0.68 * fw, 0.30 * fh
+            else:                        # explicit position: the user's
+                maxw, maxh = 0.95 * fw, 0.90 * fh   # call, just guard the page
+            ttl = self.legend_title.get().strip()
+            n = len(labels)
+            adapted = False
+            try:                     # render ONCE, only if the cached
+                renderer = self.fig.canvas.get_renderer()   # renderer is
+                if (int(renderer.width), int(renderer.height)) != (
+                        int(self.fig.bbox.width), int(self.fig.bbox.height)):
+                    self.fig.canvas.draw()
+                    renderer = self.fig.canvas.get_renderer()
+            except Exception:
+                self.fig.canvas.draw()
+                renderer = self.fig.canvas.get_renderer()
+            for _ in range(12):
+                bb = leg.get_window_extent(renderer)
+                w_in = bb.width / float(self.fig.dpi)
+                h_in = bb.height / float(self.fig.dpi)
+                if w_in <= maxw and h_in <= maxh:
+                    break
+                if (h_in > maxh and nc < min(n, 5)
+                        and w_in * (nc + 1.0) / nc <= maxw * 1.15):
+                    nc += 1
+                elif fs > 4:
+                    fs -= 1
+                else:
+                    break
+                adapted = True
+                kw = {"fontsize": fs, "ncol": nc,
+                      "handlelength": 1.2, "handletextpad": 0.5,
+                      "columnspacing": 0.8, "labelspacing": 0.35,
+                      "borderpad": 0.35, "handleheight": 0.8}
+                if ttl:
+                    kw["title"] = ttl
+                    try:
+                        kw["title_fontsize"] = min(
+                            int(self.legend_title_fs.get()), fs + 2)
+                    except (ValueError, tk.TclError):
+                        kw["title_fontsize"] = fs + 1
+                xy = self._xy_custom("legend")
+                if xy:
+                    leg = self.ax.legend(handles, labels, loc="center",
+                                         bbox_to_anchor=xy, **kw)
+                elif loc in LEG_OUTSIDE:
+                    _an, _lc = LEG_OUTSIDE[loc]
+                    leg = self.ax.legend(handles, labels,
+                                         bbox_to_anchor=_an, loc=_lc, **kw)
+                else:
+                    leg = self.ax.legend(handles, labels, loc=loc, **kw)
+                self._style_legend(leg)
+            if adapted:
+                # reflect what was actually drawn in the Legend panel, so
+                # the controls stay truthful (and the next fit starts from
+                # these values and converges immediately)
+                try:
+                    if int(self.legend_cols.get()) != nc:
+                        self.legend_cols.set(nc)
+                    if int(self.legend_fs.get()) != fs:
+                        self.legend_fs.set(fs)
+                except (ValueError, tk.TclError):
+                    pass
+                self.fig.canvas.draw()
+        except Exception:
+            pass
 
     def _style_legend(self, leg):
         self._wire_legend_picks(leg)
         """Theme + user-style the legend frame and text."""
         if not leg:
             return
-        _u, _f, _fl, pb, pf = self._theme_palette()
+        # the legend sits ON the plot page, so its face must follow the
+        # EFFECTIVE page colour (white when 'theme bg' is off), not the
+        # theme's plot palette -- a dark accent theme was drawing a dark
+        # box + dark text on the white page
+        pb = self._mpl_colors()[0]
+        pf = self._theme_palette()[4]
         tcol = self._axis_text_colors(pf)[1]
         edge = self.legend_edge.get()
         edge = tcol if edge == "auto" else edge
@@ -8061,14 +8897,23 @@ class App:
             fr.set_edgecolor("none"); fr.set_linewidth(0)
         for t in leg.get_texts():
             t.set_color(tcol)
+            t.set_fontweight(self._fw(getattr(self, "legend_bold", None)))
+            t.set_fontstyle(self._fst(getattr(self, "legend_italic", None)))
         ttl = leg.get_title()
         if ttl is not None:
             ttl.set_color(tcol)
 
+    def _cbar_loc(self):
+        """Colorbar location: right / left / top / bottom. Legacy saved
+        values (vertical / horizontal) map to right / bottom."""
+        v = self.cbar_orient.get()
+        return {"vertical": "right", "horizontal": "bottom"}.get(
+            v, v if v in ("right", "left", "top", "bottom") else "right")
+
     def _cbar_kwargs(self):
         """colorbar() kwargs from the colorbar controls."""
         kw = {"label": self.cbar_label.get(),
-              "orientation": self.cbar_orient.get()}
+              "location": self._cbar_loc()}
         try:
             kw["fraction"] = max(0.01, float(self.cbar_width.get()))
         except (ValueError, tk.TclError):
@@ -8092,7 +8937,15 @@ class App:
                               labelsize=_num(self.cbar_tick_fs, 10, int))
             cb.set_label(self.cbar_label.get(),
                          fontsize=_num(self.cbar_label_fs, 10, int),
-                         color=tcol)
+                         color=tcol,
+                         fontweight=self._fw(getattr(self, "cbar_bold",
+                                                     None)),
+                         fontstyle=self._fst(getattr(self, "cbar_italic",
+                                                     None)))
+            for _ct in (list(cb.ax.get_xticklabels())
+                        + list(cb.ax.get_yticklabels())):
+                _ct.set_fontweight(self._fw(getattr(self, "cbar_bold",
+                                                    None)))
             n = _num(self.cbar_nticks, 0, int)
             if n > 0:
                 from matplotlib.ticker import MaxNLocator
@@ -8167,6 +9020,20 @@ class App:
             for s in sec.spines.values():
                 s.set_color(acol)
             sec.tick_params(colors=tcol, labelsize=int(self.tick_fs.get()))
+            if axis == "x":
+                try:
+                    _rot = int(self.xtick_rot.get())
+                    if _rot:
+                        sec.tick_params(axis="x", labelrotation=_rot)
+                except (ValueError, tk.TclError, AttributeError):
+                    pass
+            try:
+                for _tl in (sec.get_xticklabels() if axis == "x"
+                            else sec.get_yticklabels()):
+                    _tl.set_fontweight(self._fw(self.tick_bold))
+                    _tl.set_fontstyle(self._fst(self.tick_italic))
+            except Exception:
+                pass
             lab = sec.xaxis.label if axis == "x" else sec.yaxis.label
             lab.set_color(tcol)
             lab.set_size(int(self.label_fs.get()))
@@ -8222,8 +9089,17 @@ class App:
 
     def _redraw_now(self):
         self._redraw_after = None
+        if not getattr(self, "_xy_sync_cid", None):
+            try:
+                self._xy_sync_cid = self.fig.canvas.mpl_connect(
+                    "draw_event", self._sync_xy_readouts)
+            except Exception:
+                self._xy_sync_cid = -1
         try:
             self._redraw_inner()
+            if getattr(self, "fig_preview", None) is not None \
+                    and self.fig_preview.get():
+                self._autofit_legend()   # WYSIWYG previews the export reflow
         except Exception as e:
             self._report_error("Plot error", e)
         self._sync_slider_entries()
@@ -8351,13 +9227,23 @@ class App:
             # 3D ridge is inherently multi-pressure; render the landscape.
             # Inspect (one pressure's channels) is 2D only, so it overrides 3D.
             self.ax = self.fig.add_subplot(111, projection="3d")
-            self._wf3d_cbar_vert = False
+            self._wf3d_cbar_loc = None
             self._draw_wf3d(unit, cmap_name, lw)
-            # tight_layout fights 3D axes; use a fixed margin instead. A
-            # vertical colorbar (explicit cax at x=0.90) needs the 3D axes
-            # held back so the projected z ticks/label stay clear of it.
-            _r = 0.80 if self._wf3d_cbar_vert else 0.98
-            self.fig.subplots_adjust(left=0.02, right=_r, top=0.96, bottom=0.04)
+            if getattr(self, "flipy", None) is not None and self.flipy.get():
+                _fz = sorted(self.ax.get_zlim())
+                self.ax.set_zlim(_fz[1], _fz[0])   # 2D Flip Y = absorbance
+            # tight_layout fights 3D axes; use a fixed margin instead. With
+            # a colorbar (explicit cax), hold the 3D axes back on that side
+            # so the projected ticks/labels stay clear of the bar.
+            _m = {"right":  (0.02, 0.80, 0.96, 0.04),
+                  "left":   (0.19, 0.98, 0.96, 0.04),
+                  "top":    (0.02, 0.98, 0.84, 0.04),
+                  "bottom": (0.02, 0.98, 0.96, 0.17)}.get(
+                self._wf3d_cbar_loc, (0.02, 0.98, 0.96, 0.04))
+            self.fig.subplots_adjust(left=_m[0], right=_m[1],
+                                     top=_m[2], bottom=_m[3])
+            self._text_weight_pass()
+            self._draw_footnote()
             self._sync_limit_boxes()
             self._sync_tick_boxes(self.ax, True)
             self.canvas.draw_idle(); return
@@ -8389,6 +9275,10 @@ class App:
                 tkw["pad"] = float(self.title_pad.get())
             except (ValueError, tk.TclError):
                 pass
+            _txy = self._xy_custom("title")
+            if _txy:
+                tkw.pop("loc", None)
+                tkw["x"], tkw["y"] = _txy
             self.ax.set_title(self.title_v.get(), **tkw)
 
         # vertical + horizontal reference markers (independent styling)
@@ -8451,7 +9341,16 @@ class App:
                                 "Could not draw the top axis: %s" % e)
 
         self._build_right_axis(unit)
-        self.fig.tight_layout()
+        self._draw_inset()
+        self._apply_tick_format()
+        self._text_weight_pass()
+        self._draw_footnote()
+        import warnings as _w
+        with _w.catch_warnings():
+            # a custom-positioned colorbar (explicit cax) is not a subplot;
+            # tight_layout still lays the main axes out fine but warns
+            _w.simplefilter("ignore", UserWarning)
+            self.fig.tight_layout()
         self._sync_limit_boxes()
         self._sync_tick_boxes(self.ax, False)
         self.canvas.draw_idle()
@@ -8613,6 +9512,160 @@ class App:
         except Exception:
             pass
 
+    def _draw_footnote(self):
+        """Page-annotation text stamped bottom-left of the figure (the
+        Origin 'page text' idea: sample notes, run IDs, preliminary
+        stamps). Cleared naturally by the per-redraw fig.clf()."""
+        try:
+            txt = self.footnote_v.get().strip()
+        except (AttributeError, tk.TclError):
+            return
+        if not txt:
+            return
+        try:
+            self.fig.text(0.008, 0.008, txt,
+                          fontsize=max(4, int(self.footnote_fs.get())),
+                          color=self._mpl_colors()[1],
+                          ha="left", va="bottom")
+        except Exception:
+            pass
+
+    def _draw_inset(self):
+        """2D inset zoom: replot the drawn curves into a small corner panel
+        limited to [X from, X to] and mark the region on the main axes."""
+        if (getattr(self, "inset_on", None) is None
+                or not self.inset_on.get()):
+            return
+        try:
+            x1 = float(self.inset_x1.get())
+            x2 = float(self.inset_x2.get())
+        except (ValueError, tk.TclError):
+            return
+        if x2 <= x1:
+            return
+        try:
+            sz = max(0.15, min(0.5, float(self.inset_size.get())))
+        except (ValueError, tk.TclError):
+            sz = 0.32
+        rects = {"upper right": [0.98 - sz, 0.95 - sz, sz, sz],
+                 "upper left": [0.05, 0.95 - sz, sz, sz],
+                 "lower left": [0.05, 0.07, sz, sz],
+                 "lower right": [0.98 - sz, 0.07, sz, sz]}
+        try:
+            axins = self.ax.inset_axes(
+                rects.get(self.inset_loc.get(), rects["upper right"]))
+            ylo = yhi = None
+            for ln in self.ax.get_lines():
+                xd = np.asarray(ln.get_xdata(), float)
+                yd = np.asarray(ln.get_ydata(), float)
+                if xd.size < 2:
+                    continue
+                axins.plot(xd, yd, color=ln.get_color(),
+                           lw=max(0.5, (ln.get_linewidth() or 1) * 0.8),
+                           ls=ln.get_linestyle(),
+                           alpha=(ln.get_alpha() or 1))
+                m = (xd >= x1) & (xd <= x2) & np.isfinite(yd)
+                if m.any():
+                    lo = float(np.nanmin(yd[m]))
+                    hi = float(np.nanmax(yd[m]))
+                    ylo = lo if ylo is None else min(ylo, lo)
+                    yhi = hi if yhi is None else max(yhi, hi)
+            axins.set_xlim(x1, x2)
+            if ylo is not None and yhi is not None and yhi > ylo:
+                pad = 0.05 * (yhi - ylo)
+                axins.set_ylim(ylo - pad, yhi + pad)
+            fg = self._mpl_colors()[1]
+            acol, tcol = self._axis_text_colors(fg)
+            axins.tick_params(labelsize=max(5, int(self.tick_fs.get()) - 3),
+                              colors=tcol)
+            for sp in axins.spines.values():
+                sp.set_color(acol)
+            axins.set_facecolor(self._mpl_colors()[0])
+            try:
+                self.ax.indicate_inset_zoom(axins, edgecolor=tcol)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _fw(self, var):
+        try:
+            return "bold" if var.get() else "normal"
+        except (AttributeError, tk.TclError):
+            return "normal"
+
+    def _fst(self, var):
+        try:
+            return "italic" if var.get() else "normal"
+        except (AttributeError, tk.TclError):
+            return "normal"
+
+    def _text_weight_pass(self):
+        """Apply the Bold / Italic toggles to the live axes (2D and 3D):
+        title, axis labels, tick labels. Legend and colorbar get theirs in
+        their own style hooks."""
+        try:
+            ax = self.ax
+        except AttributeError:
+            return
+        try:
+            ax.title.set_fontweight(self._fw(self.title_bold))
+            ax.title.set_fontstyle(self._fst(self.title_italic))
+        except Exception:
+            pass
+        try:
+            labs = [ax.xaxis.label, ax.yaxis.label]
+            if hasattr(ax, "zaxis"):
+                labs.append(ax.zaxis.label)
+            for L in labs:
+                L.set_fontweight(self._fw(self.axlabel_bold))
+                L.set_fontstyle(self._fst(self.axlabel_italic))
+        except Exception:
+            pass
+        try:
+            tls = list(ax.get_xticklabels()) + list(ax.get_yticklabels())
+            if hasattr(ax, "get_zticklabels"):
+                tls += list(ax.get_zticklabels())
+            for T in tls:
+                T.set_fontweight(self._fw(self.tick_bold))
+                T.set_fontstyle(self._fst(self.tick_italic))
+        except Exception:
+            pass
+
+    def _apply_tick_format(self):
+        """Tick-label number format + X rotation (2D, linear axes)."""
+        from matplotlib.ticker import FormatStrFormatter, ScalarFormatter
+        try:
+            ax = self.ax
+        except AttributeError:
+            return
+
+        def apply(fmtvar, axis, scale):
+            try:
+                v = fmtvar.get()
+            except (AttributeError, tk.TclError):
+                return
+            if v == "auto" or scale != "linear":
+                return
+            if v == "scientific":
+                f = ScalarFormatter(useMathText=True)
+                f.set_powerlimits((0, 0))
+                axis.set_major_formatter(f)
+            else:
+                dec = len(v.split(".")[1]) if "." in v else 0
+                axis.set_major_formatter(FormatStrFormatter("%%.%df" % dec))
+        try:
+            apply(self.xtickfmt, ax.xaxis, ax.get_xscale())
+            apply(self.ytickfmt, ax.yaxis, ax.get_yscale())
+        except Exception:
+            pass
+        try:
+            rot = int(self.xtick_rot.get())
+            if rot:
+                ax.tick_params(axis="x", labelrotation=rot)
+        except (ValueError, tk.TclError, AttributeError):
+            pass
+
     def _apply_grid(self, ax, is3d=False):
         """Apply major and minor grid, each with its own width, opacity,
         color and dash pattern."""
@@ -8633,7 +9686,7 @@ class App:
             try:
                 _gcol = gc
                 if _grid_mode and gc == "auto":
-                    _gcol = "#3a3d45" if self.dark_mode.get() else "#cfcfcf"
+                    _gcol = "#3a3d45" if self._page_dark() else "#cfcfcf"
                 for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
                     info = axis._axinfo["grid"]
                     info["linewidth"] = gw
@@ -9031,7 +10084,7 @@ class App:
         if (getattr(self, "legend_direct", None) is not None
                 and self.legend_direct.get()):
             try:
-                _fsd = int(self.legend_fs.get())
+                _fsd = int(self.direct_fs.get())
             except (ValueError, tk.TclError):
                 _fsd = 9
             for rank, (r, (x, z)) in enumerate(zip(shown, ridges)):
@@ -9044,7 +10097,8 @@ class App:
                 _cl = self._trace_color(r, cmap_name, shown)
                 self.ax.text(float(x[_i]), ypos[rank],
                              float(np.clip(z[_i], zlo, zhi)),
-                             "  %.2f" % r["pressure_val"], color=_cl,
+                             "  %.2f" % r["pressure_val"],
+                             color=(self._direct_label_color() or _cl),
                              fontsize=_fsd, ha="left", va="center",
                              zorder=1e5)
 
@@ -9108,20 +10162,25 @@ class App:
                 return d
         zdef = "Absorbance" if chan == "absorbance" else "Counts"
         self._autofill_labels(unit_label(unit), "Pressure (GPa)", zdef)
-        lkw = {}
-        if getattr(self, "xlabel_loc", None) is not None and                 self.xlabel_loc.get() in ("left", "center", "right"):
-            lkw["loc"] = self.xlabel_loc.get()
-        try:
-            self.ax.set_xlabel(self.xlabel_v.get() or unit_label(unit),
-                               fontsize=int(self.label_fs.get()), color=tcol,
-                               labelpad=_lp(self.lblpad3d_x, 15.0), **lkw)
-        except Exception:
-            self.ax.set_xlabel(self.xlabel_v.get() or unit_label(unit),
-                               fontsize=int(self.label_fs.get()), color=tcol,
-                               labelpad=_lp(self.lblpad3d_x, 15.0))
-        self.ax.set_ylabel(self.ylabel_v.get() or "Pressure (GPa)",
+        _xloc = (self.xlabel_loc.get()
+                 if getattr(self, "xlabel_loc", None) is not None
+                 else "center")
+        _yloc = (self.ylabel_loc.get()
+                 if getattr(self, "ylabel_loc", None) is not None
+                 else "center")
+        _xtext = self.xlabel_v.get() or unit_label(unit)
+        _ytext = self.ylabel_v.get() or "Pressure (GPa)"
+        self.ax.set_xlabel("" if _xloc in ("left", "right") else _xtext,
+                           fontsize=int(self.label_fs.get()), color=tcol,
+                           labelpad=_lp(self.lblpad3d_x, 15.0))
+        self.ax.set_ylabel("" if _yloc in ("bottom", "top") else _ytext,
                           fontsize=int(self.label_fs.get()),
                           color=tcol, labelpad=_lp(self.lblpad3d_y, 15.0))
+        if _xloc in ("left", "right") or _yloc in ("bottom", "top"):
+            try:
+                self._wf3d_aligned_labels(_xloc, _xtext, _yloc, _ytext, tcol)
+            except Exception:
+                pass
         self.ax.set_zlabel(self.zlabel_v.get() or zdef,
                           fontsize=int(self.label_fs.get()), color=tcol,
                           labelpad=_lp(self.lblpad3d_z, 10.0))
@@ -9146,6 +10205,10 @@ class App:
                 tkw3["pad"] = float(self.title_pad.get())
             except (ValueError, tk.TclError):
                 pass
+            _txy = self._xy_custom("title")
+            if _txy:
+                tkw3.pop("loc", None)
+                tkw3["x"], tkw3["y"] = _txy
             self.ax.set_title(self.title_v.get(),
                               fontsize=int(self.title_fs.get()), color=tcol,
                               **tkw3)
@@ -9170,9 +10233,9 @@ class App:
             elif pmode == "light gray":
                 pane_bg = "#e9e9e9"
             elif pmode == "grid":   # classic matplotlib look: gray + gridlines
-                pane_bg = "#23252b" if self.dark_mode.get() else "#e8e8e8"
-            else:               # white (dark themes keep their dark panes)
-                pane_bg = "#2b2e36" if self.dark_mode.get() else "white"
+                pane_bg = "#23252b" if self._page_dark() else "#e8e8e8"
+            else:               # white (a dark PAGE keeps dark panes)
+                pane_bg = "#2b2e36" if self._page_dark() else "white"
             for pane in (self.ax.xaxis, self.ax.yaxis, self.ax.zaxis):
                 pane.pane.set_facecolor(pane_bg)
                 pane.pane.set_edgecolor((1, 1, 1, 0))
@@ -9312,27 +10375,33 @@ class App:
                                 cmap=colormaps._continuous_cmap(cmap_name))
             sm.set_array([])
             ckw = self._cbar_kwargs()
-            if ckw.get("orientation") == "horizontal":
-                cb = self.fig.colorbar(sm, ax=self.ax, shrink=0.6, pad=0.08,
-                                       **ckw)
-                self._style_colorbar(cb)
-            else:
-                # vertical: an explicit cax we own. fig.colorbar(ax=...)
-                # places the bar so far right that its ticks + rotated
-                # label fall off the page at journal aspect ratios, and a
-                # locator re-applies that position on every draw. Reserve
-                # the right edge for the bar and keep the 3D axes clear
-                # of it (fixes the z-label / colorbar collision too).
-                try:
-                    frac = max(0.012, min(0.06, ckw.pop("fraction", 0.046)
-                                          * 0.5))
-                except Exception:
-                    frac = 0.022
-                cax = self.fig.add_axes([0.90, 0.20, frac, 0.60])
-                cb = self.fig.colorbar(sm, cax=cax, **ckw)
-                self._style_colorbar(cb)
+            loc = ckw.get("location", "right")
+            # an explicit cax we own for every location: fig.colorbar(ax=)
+            # bars are locator-managed (their position re-applies on every
+            # draw) and can push ticks/labels off the page at journal
+            # aspect ratios. The matching 3D-axes margin is applied by the
+            # subplots_adjust after _draw_wf3d via self._wf3d_cbar_loc.
+            try:
+                frac = max(0.012, min(0.06, ckw.pop("fraction", 0.046)
+                                      * 0.5))
+            except Exception:
+                frac = 0.022
+            rects = {"right":  [0.90, 0.20, frac, 0.60],
+                     "left":   [0.075, 0.20, frac, 0.60],
+                     "top":    [0.28, 0.86, 0.44, frac],
+                     "bottom": [0.28, 0.10, 0.44, frac]}
+            rect = list(rects.get(loc, rects["right"]))
+            _cxy = self._xy_custom("cbar")
+            if _cxy:            # custom centre, keep the location's size
+                rect[0] = _cxy[0] - rect[2] / 2
+                rect[1] = _cxy[1] - rect[3] / 2
+            cax = self.fig.add_axes(rect)
+            cb = self.fig.colorbar(sm, cax=cax, **ckw)
+            self._style_colorbar(cb)
+            self._last_cbar = cb
+            if loc in ("right", "left"):
                 cb.ax.yaxis.labelpad = 8
-                self._wf3d_cbar_vert = True   # narrows the 3D axes margin
+            self._wf3d_cbar_loc = loc
         elif (self.legend_on.get()
               and not (getattr(self, "legend_direct", None) is not None
                        and self.legend_direct.get())):
@@ -9351,14 +10420,71 @@ class App:
             if ttl:
                 kw["title"] = ttl
                 kw["title_fontsize"] = int(self.legend_title_fs.get())
-            if loc == "outside right":
-                leg = self.ax.legend(h, l, bbox_to_anchor=(1.02, 1),
-                                     loc="upper left", **kw)
+            xy = self._xy_custom("legend")
+            if xy:
+                leg = self.ax.legend(h, l, loc="center",
+                                     bbox_to_anchor=xy, **kw)
+            elif loc in LEG_OUTSIDE:
+                _an, _lc = LEG_OUTSIDE[loc]
+                leg = self.ax.legend(h, l, bbox_to_anchor=_an,
+                                     loc=_lc, **kw)
             else:
                 leg = self.ax.legend(h, l, loc=loc, **kw)
             self._style_legend(leg)
 
     # ---- inspect one pressure (S/B/D counts + Abs on right axis) ---------
+    def _wf3d_aligned_labels(self, xloc, xtext, yloc, ytext, tcol):
+        """X pos / Y pos support for the 3D ridge. Matplotlib has no
+        along-axis alignment for 3D labels, so an off-center choice draws
+        the label as data-space text at the chosen end of its axis (the
+        position re-projects with the camera; rotation is computed from
+        the current view)."""
+        import math as _m
+        from mpl_toolkits.mplot3d import proj3d
+        try:
+            fs = int(self.label_fs.get())
+        except (ValueError, tk.TclError):
+            fs = 10
+        x0, x1 = self.ax.get_xlim()
+        y0, y1 = self.ax.get_ylim()
+        z0, _z1 = self.ax.get_zlim()
+        az = _m.radians(float(self.wf3d_azim.get()))
+        ny = y1 if _m.sin(az) >= 0 else y0    # the x-axis label edge
+        nx = x1 if _m.cos(az) >= 0 else x0    # the y-axis label edge
+        try:
+            M = self.ax.get_proj()
+        except Exception:
+            M = None
+
+        def _rot(p0, p1):
+            if M is None:
+                return 0.0
+            try:
+                sx0, sy0, _ = proj3d.proj_transform(p0[0], p0[1], p0[2], M)
+                sx1, sy1, _ = proj3d.proj_transform(p1[0], p1[1], p1[2], M)
+                a = _m.degrees(_m.atan2(sy1 - sy0, sx1 - sx0))
+                if a > 90:
+                    a -= 180
+                elif a < -90:
+                    a += 180
+                return a
+            except Exception:
+                return 0.0
+        if xloc in ("left", "right"):
+            f = 0.14 if xloc == "left" else 0.86
+            oy = ny + (0.36 if ny == y1 else -0.36) * (y1 - y0)
+            self.ax.text(x0 + f * (x1 - x0), oy, z0, xtext,
+                         fontsize=fs, color=tcol, ha="center", va="center",
+                         rotation=_rot((x0, ny, z0), (x1, ny, z0)),
+                         rotation_mode="anchor", clip_on=False)
+        if yloc in ("bottom", "top"):
+            f = 0.14 if yloc == "bottom" else 0.86
+            ox = nx + (0.30 if nx == x1 else -0.30) * (x1 - x0)
+            self.ax.text(ox, y0 + f * (y1 - y0), z0, ytext,
+                         fontsize=fs, color=tcol, ha="center", va="center",
+                         rotation=_rot((nx, y0, z0), (nx, y1, z0)),
+                         rotation_mode="anchor", clip_on=False)
+
     def _draw_wf3d_guides(self, unit, zlog, fallback_color):
         """Render the 2D reference markers as translucent planes in the 3D box:
         each vertical (spectral) marker becomes an X-plane spanning the pressure
@@ -9671,6 +10797,34 @@ class App:
             "title": self.title_v, "xlabel": self.xlabel_v, "ylabel": self.ylabel_v,
             "legend_on": self.legend_on, "colorbar_on": self.colorbar_on,
             "legend_loc": self.legend_loc, "legend_cols": self.legend_cols,
+            "legend_x": self.legend_x, "legend_y": self.legend_y,
+            "title_x": self.title_x, "title_y": self.title_y,
+            "cbar_x": self.cbar_x, "cbar_y": self.cbar_y,
+            "legend_xy_pin": self.legend_xy_pin,
+            "legend_autofit": self.legend_autofit,
+            "exp_also_png": self.exp_also_png,
+            "exp_also_pdf": self.exp_also_pdf,
+            "exp_also_svg": self.exp_also_svg,
+            "exp_also_tif": self.exp_also_tif,
+            "exp_editable": self.exp_editable, "exp_gray": self.exp_gray,
+            "exp_open": self.exp_open, "exp_name_tpl": self.exp_name_tpl,
+            "batch_fmt": self.batch_fmt,
+            "title_bold": self.title_bold, "title_italic": self.title_italic,
+            "axlabel_bold": self.axlabel_bold,
+            "axlabel_italic": self.axlabel_italic,
+            "tick_bold": self.tick_bold, "tick_italic": self.tick_italic,
+            "legend_bold": self.legend_bold,
+            "legend_italic": self.legend_italic,
+            "cbar_bold": self.cbar_bold, "cbar_italic": self.cbar_italic,
+            "xtickfmt": self.xtickfmt, "ytickfmt": self.ytickfmt,
+            "xtick_rot": self.xtick_rot,
+            "footnote_v": self.footnote_v, "footnote_fs": self.footnote_fs,
+            "inset_on": self.inset_on, "inset_x1": self.inset_x1,
+            "inset_x2": self.inset_x2, "inset_loc": self.inset_loc,
+            "inset_size": self.inset_size,
+            "direct_fs": self.direct_fs, "direct_color": self.direct_color,
+            "title_xy_pin": self.title_xy_pin,
+            "cbar_xy_pin": self.cbar_xy_pin,
             "auto_key": self.auto_key, "legend_swatch": self.legend_swatch,
             "zoom2d_axis": self.zoom2d_axis,
             "legend_border": self.legend_border, "legend_alpha": self.legend_alpha,
@@ -9888,7 +11042,7 @@ class App:
         ttk.Button(bb, text="Close", command=win.destroy).pack(side="right")
         ghb = ttk.Button(bb, text="GitHub", command=lambda: __import__(
             "webbrowser").open(
-            "https://github.com/NoisySnooper/Beamline-DAC-Data-Tool"))
+            "https://github.com/NoisySnooper/SQUISHE"))
         ghb.pack(side="right", padx=(0, 6))
         Tooltip(ghb, "Open the project repository in your browser.")
         hdr = ttk.Frame(win, padding=(12, 10, 12, 4)); hdr.pack(fill="x")
@@ -10108,37 +11262,128 @@ class App:
             pass
 
     # ---- exports ----------------------------------------------------------
+    def _export_rc(self):
+        """rcParams for exports. 'Editable text' embeds TrueType text
+        (pdf/ps fonttype 42, SVG text-as-text) so journals accept the
+        vectors and Illustrator can edit labels; off = outlined paths."""
+        ed = (getattr(self, "exp_editable", None) is None
+              or self.exp_editable.get())
+        return {"pdf.fonttype": 42 if ed else 3,
+                "ps.fonttype": 42 if ed else 3,
+                "svg.fonttype": "none" if ed else "path"}
+
+    def _export_metadata(self, fmt):
+        """In-file metadata for formats that support it (the file itself
+        stays traceable, in addition to the provenance sidecar)."""
+        soft = "%s %s" % (BRAND["name"], APP_VERSION)
+        tab = self._tab_name()
+        desc = "input: %s | mode: %s | waterfall: %s | cmap: %s" % (
+            self.in_var.get(), self.mode.get(), self.wf_mode.get(),
+            self.cmap.get())
+        if fmt == "png":
+            return {"Software": soft, "Title": tab, "Description": desc}
+        if fmt == "pdf":
+            return {"Creator": soft, "Title": tab, "Subject": desc}
+        if fmt == "svg":
+            return {"Creator": soft}
+        return None
+
+    def _tab_name(self):
+        try:
+            return self.sessions[self.active]["name"]
+        except Exception:
+            return "plot"
+
+    def _suggest_filename(self):
+        """Expand the file-name template into the dialog's suggestion."""
+        import datetime as _dt
+        try:
+            tpl = self.exp_name_tpl.get().strip() or "{tab}_{mode}_{date}"
+        except (AttributeError, tk.TclError):
+            tpl = "{tab}_{mode}_{date}"
+        wf = self.wf_mode.get()
+        toks = {"tab": self._tab_name(), "mode": self.mode.get(),
+                "wf": ("2Dstacked" if wf == "2D stacked" else
+                       "3Dridge" if wf == "3D ridge" else "overlay"),
+                "preset": self.fig_preset.get(), "cmap": self.cmap.get(),
+                "date": _dt.date.today().isoformat()}
+        out = tpl
+        for k, v in toks.items():
+            out = out.replace("{%s}" % k, str(v))
+        return re.sub(r"[^A-Za-z0-9._+-]+", "_", out).strip("_") or "plot"
+
     def _save_plot(self):
+        import matplotlib as _mpl
         path = filedialog.asksaveasfilename(
             defaultextension=".png",
+            initialfile=self._suggest_filename(),
             filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg"),
                        ("EPS", "*.eps"), ("TIFF", "*.tif *.tiff")])
         if not path:
             return
+        stem, ext = os.path.splitext(path)
+        fmts = [(ext.lstrip(".") or "png").lower()]
+        for v, f in ((getattr(self, "exp_also_png", None), "png"),
+                     (getattr(self, "exp_also_pdf", None), "pdf"),
+                     (getattr(self, "exp_also_svg", None), "svg"),
+                     (getattr(self, "exp_also_tif", None), "tif")):
+            if (v is not None and v.get() and f not in fmts
+                    and not (f == "tif" and fmts[0] == "tiff")):
+                fmts.append(f)
         old = self.fig.get_size_inches()
         try:
             self.fig.set_size_inches(float(self.fig_w.get()),
                                      float(self.fig_h.get()))
         except (ValueError, tk.TclError):
             pass
+        written = []
         try:
-            self.fig.savefig(path, dpi=int(self.dpi.get()),
-                             **self._export_kwargs())
-            self._logline("Saved plot -> " + path)
-            self._toast("Saved " + os.path.basename(path))
+            with _mpl.rc_context(self._export_rc()):
+                kw = self._export_kwargs()
+                for f in fmts:
+                    p = path if f == fmts[0] else stem + "." + f
+                    fkw = dict(kw)
+                    md = self._export_metadata(f)
+                    if md:
+                        fkw["metadata"] = md
+                    self.fig.savefig(p, dpi=int(self.dpi.get()), **fkw)
+                    written.append(p)
+                if (getattr(self, "exp_gray", None) is not None
+                        and self.exp_gray.get()):
+                    from PIL import Image
+                    buf = io.BytesIO()
+                    self.fig.savefig(buf, format="png",
+                                     dpi=int(self.dpi.get()), **kw)
+                    buf.seek(0)
+                    gp = stem + "_grayscale.png"
+                    Image.open(buf).convert("L").save(gp)
+                    written.append(gp)
+            self._logline("Saved plot -> " + ", ".join(
+                os.path.basename(p) for p in written))
+            self._toast("Saved %d file%s" % (len(written),
+                                             "s" if len(written) > 1 else ""))
             self._provenance(path, "plot", {
                 "dpi": self.dpi.get(), "size_in": [self.fig_w.get(),
                                                    self.fig_h.get()],
+                "formats": fmts,
+                "editable_text": bool(getattr(self, "exp_editable", None)
+                                      and self.exp_editable.get()),
                 "preset": self.preset_sel.get(), "mode": self.mode.get(),
                 "waterfall": self.wf_mode.get(), "cmap": self.cmap.get(),
                 "x_unit": self.xunit.get(), "defringe": self.show_notch.get(),
-                "smoothed": self.show_smooth.get()}, files=[path])
+                "smoothed": self.show_smooth.get()}, files=written)
+            if (getattr(self, "exp_open", None) is not None
+                    and self.exp_open.get() and written):
+                try:
+                    os.startfile(written[0])
+                except Exception:
+                    pass
         except Exception as e:
             messagebox.showerror("Save plot",
                                  "Could not save:\n%s\n(%s)" % (path, e))
         finally:
             self.fig.set_size_inches(old)   # keep the live canvas intact
-            self.canvas.draw_idle()
+            self._redraw()      # rebuild legend/layout at the screen size
 
     def _bbox3d_inches(self, pad):
         """Pixel-accurate tight bbox (inches) for 3D exports. Matplotlib's
@@ -10175,6 +11420,7 @@ class App:
     def _export_kwargs(self):
         """savefig kwargs from the Journal/figure export controls. Call with
         the figure already at its export size (Save plot / Copy figure do)."""
+        self._autofit_legend()          # reflow the legend for the page size
         kw = {}
         if getattr(self, "fig_tight", None) is None or self.fig_tight.get():
             try:
@@ -10209,7 +11455,7 @@ class App:
         into the caller. Main-thread only (reads self.in_var)."""
         import datetime as _dt
         payload = {
-            "tool": "DAC_QuickLook (Beamline DAC Data Tool)",
+            "tool": "%s (formerly Beamline DAC Data Tool)" % BRAND["name"],
             "version": APP_VERSION,
             "written": _dt.datetime.now().isoformat(timespec="seconds"),
             "kind": kind,
@@ -10230,32 +11476,62 @@ class App:
             return None
 
     def _batch_export(self):
+        """One styled figure per shown trace: each trace is soloed on the
+        REAL plot (current mode, labels, fonts, journal size, theme) and
+        exported through the full pipeline -- what you see is what every
+        file gets. The previous batch drew bare unstyled 6x4 plots."""
+        import matplotlib as _mpl
         shown = self._shown()
         if not shown:
             messagebox.showinfo("Batch export", "No traces selected."); return
-        folder = filedialog.askdirectory(title="Folder for per-trace PNGs")
+        fmt = (self.batch_fmt.get() or "png").lower() \
+            if getattr(self, "batch_fmt", None) is not None else "png"
+        folder = filedialog.askdirectory(
+            title="Folder for per-trace %ss" % fmt.upper())
         if not folder:
             return
-        unit = self.xunit.get()
-        for r in shown:
-            fig = Figure(figsize=(6, 4), dpi=100); a = fig.add_subplot(111)
-            x = unit_x(r, unit)
-            ls = self._trace_ls(r)
-            y = (self._smoothed(r) if self.show_smooth.get() else self._abs(r))
-            a.plot(x, y, ls=ls, color="#205070")
-            a.set_xlabel(unit_label(unit)); a.set_ylabel("Absorbance")
-            a.set_title(r["label"])
-            if self.flipx.get():
-                a.invert_xaxis()
-            if self.flipy.get():
-                a.invert_yaxis()
-            name = re.sub(r"[^A-Za-z0-9.+-]+", "_", r["label"]) + ".png"
-            fig.tight_layout(); fig.savefig(os.path.join(folder, name),
-                                            dpi=int(self.dpi.get()))
-        self._logline("Batch-exported %d PNG(s) -> %s" % (len(shown), folder))
-        self._provenance(folder, "batch_png", {
-            "n_traces": len(shown), "dpi": self.dpi.get(),
-            "x_unit": self.xunit.get(), "smoothed": self.show_smooth.get(),
+        states = {lbl: v.get() for lbl, v in self.trace_vars.items()}
+        old = self.fig.get_size_inches()
+        written = []
+        try:
+            with _mpl.rc_context(self._export_rc()):
+                for r in shown:
+                    for lbl, v in self.trace_vars.items():
+                        v.set(lbl == r["label"])
+                    self._redraw_now()
+                    try:
+                        self.fig.set_size_inches(float(self.fig_w.get()),
+                                                 float(self.fig_h.get()))
+                    except (ValueError, tk.TclError):
+                        pass
+                    name = re.sub(r"[^A-Za-z0-9.+-]+", "_",
+                                  r["label"]) + "." + fmt
+                    kw = self._export_kwargs()
+                    md = self._export_metadata(fmt)
+                    if md:
+                        kw["metadata"] = md
+                    p = os.path.join(folder, name)
+                    self.fig.savefig(p, dpi=int(self.dpi.get()), **kw)
+                    written.append(p)
+                    self.fig.set_size_inches(old)
+                    self._logline("  . %s" % name)
+        except Exception as e:
+            messagebox.showerror("Batch export",
+                                 "Stopped at %d file(s):\n%s"
+                                 % (len(written), e))
+        finally:
+            for lbl, v in self.trace_vars.items():
+                if lbl in states:
+                    v.set(states[lbl])
+            self.fig.set_size_inches(old)
+            self._redraw_now()
+        self._logline("Batch-exported %d %s file(s) -> %s"
+                      % (len(written), fmt.upper(), folder))
+        self._provenance(folder, "batch_" + fmt, {
+            "n_traces": len(written), "dpi": self.dpi.get(),
+            "format": fmt, "size_in": [self.fig_w.get(), self.fig_h.get()],
+            "styled": True, "x_unit": self.xunit.get(),
+            "smoothed": self.show_smooth.get(),
             "defringe": self.show_notch.get()})
 
     def _export_defringed(self):
@@ -10341,7 +11617,7 @@ class App:
                                  **kw)
             finally:
                 self.fig.set_size_inches(old)
-                self.canvas.draw_idle()
+                self._redraw()  # rebuild legend/layout at the screen size
             buf.seek(0)
             if sys.platform == "win32":
                 import win32clipboard

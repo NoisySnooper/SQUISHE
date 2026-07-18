@@ -1,6 +1,6 @@
 # beamline_tool.spec  --  PyInstaller ONEDIR build for the DAC Quick-Look tool.
 # Build:  pyinstaller beamline_tool.spec
-# Output: dist\DAC_QuickLook\DAC_QuickLook.exe  (ship the whole folder)
+# Output: dist\SQUISHE\SQUISHE.exe  (ship the whole folder)
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -41,7 +41,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DAC_QuickLook",
+    name="SQUISHE",
     debug=False,
     strip=False,
     upx=False,
@@ -56,5 +56,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="DAC_QuickLook",
+    name="SQUISHE",
 )

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Beamline DAC Data Tool - macOS launcher. Double-click to run.
+# SQUISHE - macOS launcher. Double-click to run.
 # First time only, in Terminal in this folder:  chmod +x run_mac.command
 # If you see "bad interpreter", run it as:      bash run_mac.command
 cd "$(dirname "$0")"

@@ -1,4 +1,4 @@
-# Beamline DAC Data Tool on macOS
+# SQUISHE on macOS
 
 The tool is pure Python (tkinter / numpy / scipy / matplotlib) and runs on
 macOS. Windows-only bits (Explorer open, clipboard copy) have macOS
@@ -20,7 +20,7 @@ works too if you also `brew install python-tk`.
 ## Option B - native .app
 
 On the Mac that will use it, run `./build_mac_app.sh`. The app lands in
-`dist/Beamline DAC Data Tool.app`; drag it to Applications if you like.
+`dist/SQUISHE.app`; drag it to Applications if you like.
 First launch: right-click -> Open (it is unsigned, Gatekeeper will warn).
 Note: an Apple Silicon build does not run on Intel Macs and vice versa;
 build on the machine kind you will use.
@@ -39,5 +39,3 @@ writes the same absorbance CSVs as the Run button.
   Cosmetic only.
 - Settings (.quicklook_settings.json) save next to the tool, same as
   Windows, so keep the folder somewhere writable.
-
-Questions or anything misbehaving: send Nhan the log text and a screenshot.

@@ -1,16 +1,16 @@
 #!/bin/bash
-# Build a native macOS .app of the Beamline DAC Data Tool.
+# Build a native macOS .app of SQUISHE.
 # Run this ON a Mac. The app builds for that Mac's architecture:
 # Apple Silicon -> arm64 app, Intel -> x86_64 app (build one per kind).
-# Result: dist/Beamline DAC Data Tool.app
+# Result: dist/SQUISHE.app
 set -e
 cd "$(dirname "$0")"
 python3 -m venv build-env-mac
 source build-env-mac/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt pyinstaller
-pyinstaller --windowed --noconfirm --name "Beamline DAC Data Tool" \
+pyinstaller --windowed --noconfirm --name "SQUISHE" \
     --collect-data cmcrameri app.py
 echo
-echo "Done: dist/Beamline DAC Data Tool.app"
+echo "Done: dist/SQUISHE.app"
 echo "The app is unsigned: first launch is right-click -> Open (Gatekeeper)."

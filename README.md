@@ -45,6 +45,37 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   Standard Light and true-black to Rainbow, Coast Guard, and more), and an
   adjustable interface text size.
 
+## New in v1.4.6
+
+- **Deep export control**: "Also save" writes PNG/PDF/SVG/TIF in one
+  Save; "Editable text" embeds journal-safe TrueType (fonttype 42) in
+  vector exports; a grayscale print-check copy; a file-name template;
+  tool-version metadata inside PNG/PDF/SVG; and batch export now solos
+  each trace on the fully styled figure in a chosen format.
+- **Placement freedom**: legend, title, and colorbar all have live X/Y
+  readout boxes (type both values to pin a custom position); the
+  colorbar docks right/left/top/bottom; more legend locations including
+  outside left/top/bottom; the legend auto-fits oversized entries on
+  export (with an off switch) and writes the values it used back into
+  the panel.
+- **Text styling**: Bold/Italic per element (title, axis labels, ticks,
+  legend, colorbar), tick number formats (fixed decimals or scientific),
+  X tick rotation (including the top axis), a page footnote, and a 2D
+  inset-zoom panel for absorption-edge close-ups.
+- **Accessibility**: High Contrast and Colorblind Safe (Okabe-Ito)
+  themes; legend and 3D pane colors now follow the actual plot page
+  rather than the interface theme.
+- **3D parity and presets**: X pos / Y pos / Flip Y now work in 3D, and
+  Nature/Science/APS 3D journal presets style the whole 3D scene the way
+  those journals print it.
+- **Interface**: Quick Access, Progress, and Guide cards collapse;
+  panel-divider drags and pane toggles are much faster (debounced
+  redraws); theme switching is twice as fast.
+- **SQUISHE everywhere**: the repository is now
+  `github.com/NoisySnooper/SQUISHE` (the old URL redirects), the macOS
+  bundle builds as `SQUISHE.app`, and the Windows package launcher is
+  `SQUISHE.exe`.
+
 ## New in v1.4.5
 
 - **Themes, expanded**: a named theme set in the top-bar Theme menu —
@@ -122,7 +153,7 @@ pip install -r requirements.txt
 pyinstaller beamline_tool.spec
 ```
 
-The result is a self-contained folder at `dist\DAC_QuickLook\`. Ship the whole
+The result is a self-contained folder at `dist\SQUISHE\`. Ship the whole
 folder. A onedir build (rather than a single packed .exe) is used
 deliberately: it starts faster and is far less likely to be flagged by
 antivirus / SmartScreen. If SmartScreen warns on first launch (expected for
@@ -144,6 +175,13 @@ any unsigned exe): More info -> Run anyway.
 
 ## Version history
 
+- **v1.4.6** — deep export control (multi-format save, TrueType vector
+  text, grayscale check, metadata, styled batch); live X/Y placement
+  with pinning for legend/title/colorbar; colorbar docking; per-element
+  Bold/Italic, tick formats and rotation; footnote and 2D inset zoom;
+  High Contrast + Colorblind Safe themes; 3D setting parity and 3D
+  journal presets; collapsible left-panel cards; major responsiveness
+  work; SQUISHE naming everywhere (repo, SQUISHE.app, SQUISHE.exe).
 - **v1.4.5** — expanded, named theme set with themed banners and
   per-section accent colors; data-integrity hardening (channel
   wavelength-alignment, tolerant decoding, re-entrancy guard) and a

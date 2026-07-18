@@ -1,16 +1,16 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 4, 5, 0), prodvers=(1, 4, 5, 0),
+    filevers=(1, 4, 6, 0), prodvers=(1, 4, 6, 0),
     mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', 'Lee Lab'),
       StringStruct('FileDescription', 'SQUISHE (NSLS-II 22-IR-1)'),
-      StringStruct('FileVersion', '1.4.5'),
-      StringStruct('InternalName', 'DAC_QuickLook'),
-      StringStruct('OriginalFilename', 'DAC_QuickLook.exe'),
+      StringStruct('FileVersion', '1.4.6'),
+      StringStruct('InternalName', 'SQUISHE'),
+      StringStruct('OriginalFilename', 'SQUISHE.exe'),
       StringStruct('ProductName', 'SQUISHE'),
-      StringStruct('ProductVersion', '1.4.5')])]),
+      StringStruct('ProductVersion', '1.4.6')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
 )
