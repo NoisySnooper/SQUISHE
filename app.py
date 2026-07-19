@@ -71,7 +71,7 @@ LEG_OUTSIDE = {"outside right": ((1.02, 1.0), "upper left"),
                "outside top": ((0.5, 1.02), "lower center"),
                "outside bottom": ((0.5, -0.08), "upper center")}
 
-APP_VERSION = "v1.4.6"
+APP_VERSION = "v1.4.7"
 APP_CODENAME = "Olivine"
 
 # ---------------------------------------------------------------------------
@@ -157,9 +157,12 @@ INFO_TEXT = (
     "  Files that do not match are skipped (see the log above).\n\n"
     "DIFFERENT NAMING SCHEME?\n"
     "  The grammar above is only the built-in default. 'Name format'\n"
-    "  (left panel) teaches any scheme from one example file, 'Guess\n"
-    "  format' reads the folder and proposes it for you, and stubborn\n"
-    "  files can be fixed or excluded by hand (remembered per folder).\n\n"
+    "  (left panel) teaches any scheme from one example file: token\n"
+    "  order, keywords, segment numbering (digits or letters, any\n"
+    "  separator, strict or assumed-1 when absent) and default DAC /\n"
+    "  sample for pieces the names never show. 'Guess format' reads\n"
+    "  the folder and proposes it all for you, and stubborn files can\n"
+    "  be fixed or excluded by hand (remembered per folder).\n\n"
     "BRANCHES (C / D)\n"
     "  C = compression (solid),  D = decompression (dashed).\n"
     "  Auto for known experiments and _C/_D tags; toggle D per trace otherwise.\n\n"
@@ -199,22 +202,16 @@ QUICK_START = (
 
 PANEL_GUIDE = (
     "PANEL GUIDE\n\n"
-    "NEW IN v1.4.6\n"
-    "  Deep export: 'Also save' writes PNG/PDF/SVG/TIF in one go,\n"
-    "    'Editable text' embeds journal-safe TrueType in the vectors,\n"
-    "    grayscale print-check copy, file-name template, in-file\n"
-    "    metadata, and batch export now uses the fully styled figure.\n"
-    "  Placement freedom: every located element (legend, title,\n"
-    "    colorbar) has live X/Y readout boxes - type both to pin a\n"
-    "    custom spot; colorbar can sit right/left/top/bottom; more\n"
-    "    legend locations incl. outside left/top/bottom.\n"
-    "  Text styling: Bold/Italic per element (Fonts box), tick number\n"
-    "    formats, X tick rotation, a page footnote, and a 2D inset\n"
-    "    zoom panel for edge close-ups.\n"
-    "  Accessibility: High Contrast and Colorblind Safe (Okabe-Ito)\n"
-    "    themes; plot-page artists now follow the actual page colour.\n"
-    "  Quick Access, Progress and Guide cards collapse; panel drags\n"
-    "    and theme switches are much faster.\n\n"
+    "NEW IN v1.4.7\n"
+    "  Full control of segment numbering in custom name formats: any\n"
+    "    separator (including multi-character and comma-separated\n"
+    "    alternatives like '_,-'), digits or letters, and a strict-or-\n"
+    "    assumed rule for names with no segment suffix. 'Guess format'\n"
+    "    detects the convention and the Fix dialog overrides it per file.\n"
+    "  Teach by example now shows the prefix, every separator and the\n"
+    "    segment suffix in place, each labeled; single-cell folders can\n"
+    "    default the DAC / sample instead of naming them in every file.\n"
+    "  Field text stays readable in every theme, light and dark.\n\n"
     "TABS & SESSIONS  (row above the plot)\n"
     "  Each tab is an independent session with its own data, folders,\n"
     "    settings, and undo history. '+' opens a blank tab; double-click a\n"
@@ -814,6 +811,10 @@ class App:
                   lambda e: (self._apply_titlebar()
                              if e.widget is root else None), add="+")
         root.after(400, self._apply_titlebar)
+
+        # widgets built above were BORN with tk_setPalette's frozen
+        # foreground (option db) -- clear it now that they all exist
+        self._pin_field_styles()
 
         # multi-tab sessions: one shared widget tree, per-tab state swapped
         # in and out (see _capture_session / _load_session). Tab 0 captures
@@ -1846,6 +1847,16 @@ class App:
 
     # ---- theme: modern look + light/dark ---------------------------------
     def _init_theme(self):
+        try:
+            # sv_ttk re-runs Tcl's tk_setPalette from its <<ThemeChanged>>
+            # binding; that command walks EVERY widget stamping widget-
+            # level colors that override our styles at the next idle
+            # (fields went invisible whenever its base palette disagreed
+            # with the active theme). The app recolors plain tk widgets
+            # itself, so make it a no-op before sv_ttk can ever call it.
+            self.root.tk.eval("proc ::tk_setPalette {args} {}")
+        except tk.TclError:
+            pass
         t = self.theme_mode.get()
         th = self._themes().get(t, {})
         base = th.get("base", "light" if t == "light" else "dark")
@@ -1862,39 +1873,16 @@ class App:
         # style.configure overrides are global and sticky, so an accent theme's
         # tint would otherwise linger.
         uibg, fg, _fld, _pb, _pf = self._theme_palette()
+        self._pin_field_styles()
         try:
-            st = ttk.Style()
-            for w in ("TFrame", "TLabel", "TLabelframe", "TLabelframe.Label",
-                      "TCheckbutton", "TRadiobutton", "Card.TFrame"):
-                st.configure(w, background=uibg, foreground=fg)
-            # the settings notebook: drop sv_ttk's boxed border so the tabbed
-            # panel reads as flat like the hairline cards around it
-            st.configure("TNotebook", background=uibg, borderwidth=0,
-                         bordercolor=uibg, lightcolor=uibg, darkcolor=uibg)
-            st.configure("TNotebook.Client", borderwidth=0)
-            # entry / combobox / spinbox: sv_ttk leaves the field FOREGROUND
-            # unset, so dark themes drew light text on the light readonly
-            # field (unreadable -- the "white text in fields" bug). Pin the
-            # field bg AND fg for every state to the palette.
-            for w in ("TEntry", "TCombobox", "TSpinbox"):
-                st.configure(w, fieldbackground=_fld, foreground=fg,
-                             background=_fld, insertcolor=fg,
-                             selectforeground=uibg, selectbackground=fg)
-                st.map(w,
-                       fieldbackground=[("readonly", _fld),
-                                        ("disabled", _fld), ("focus", _fld)],
-                       foreground=[("readonly", fg), ("disabled", fg),
-                                   ("focus", fg)],
-                       selectforeground=[("readonly", fg)],
-                       selectbackground=[("readonly", _fld)])
-            # combobox dropdown list (a tk Listbox drawn via the option db)
-            self.root.option_add("*TCombobox*Listbox.background", _fld)
-            self.root.option_add("*TCombobox*Listbox.foreground", fg)
-            self.root.option_add("*TCombobox*Listbox.selectBackground", fg)
-            self.root.option_add("*TCombobox*Listbox.selectForeground", _fld)
-            self._sync_combo_popdowns(_fld, fg)
             self.root.configure(bg=uibg)
-        except Exception:
+        except tk.TclError:
+            pass
+        # a second assert once the switch has settled: if anything above
+        # was clobbered by late sv_ttk work, this heals it (idempotent)
+        try:
+            self.root.after(250, self._pin_field_styles)
+        except tk.TclError:
             pass
         self._apply_style_fonts()
         # accent (or reset to plain) the carets, group titles and wordmark
@@ -1909,6 +1897,119 @@ class App:
         self._recolor_accents(th.get("accent"), th.get("rainbow", False))
         matplotlib.rcParams["pdf.fonttype"] = 42
         matplotlib.rcParams["ps.fonttype"] = 42
+
+    def _pin_field_styles(self):
+        """Assert every themed style the app relies on for READABILITY:
+        chrome backgrounds, notebook flatness, and the entry/combobox/
+        spinbox field colors for every widget state. Idempotent, each
+        step guarded separately -- one failure must never silently skip
+        the rest and leave gray-on-dark text (the half-themed bug) --
+        and failures are logged instead of swallowed."""
+        uibg, fg, _fld, _pb, _pf = self._theme_palette()
+
+        def _log_fail(step, e):
+            try:
+                if hasattr(self, "log"):
+                    self._logline("! theme style step '%s' failed: %r"
+                                  % (step, e))
+            except Exception:
+                pass
+        try:
+            st = ttk.Style()
+        except Exception as e:
+            _log_fail("style", e)
+            return
+        try:
+            for w in ("TFrame", "TLabel", "TLabelframe", "TLabelframe.Label",
+                      "TCheckbutton", "TRadiobutton", "Card.TFrame"):
+                st.configure(w, background=uibg, foreground=fg)
+        except Exception as e:
+            _log_fail("chrome", e)
+        try:
+            # the settings notebook: drop sv_ttk's boxed border so the
+            # tabbed panel reads as flat like the hairline cards around it
+            st.configure("TNotebook", background=uibg, borderwidth=0,
+                         bordercolor=uibg, lightcolor=uibg, darkcolor=uibg)
+            st.configure("TNotebook.Client", borderwidth=0)
+        except Exception as e:
+            _log_fail("notebook", e)
+        # disabled text: readable muted (sv_ttk's stock gray disappears
+        # on dark accent themes), still distinct from the normal fg
+        try:
+            dfg = self._blendc(fg, uibg, 0.35)
+        except Exception:
+            dfg = fg
+        try:
+            # entry / combobox / spinbox: sv_ttk leaves the field
+            # FOREGROUND unset, so dark themes drew unreadable text on
+            # the field. Pin field bg AND fg for every widget state.
+            for w in ("TEntry", "TCombobox", "TSpinbox"):
+                st.configure(w, fieldbackground=_fld, foreground=fg,
+                             background=_fld, insertcolor=fg,
+                             selectforeground=uibg, selectbackground=fg)
+                st.map(w,
+                       fieldbackground=[("readonly", _fld),
+                                        ("disabled", _fld), ("focus", _fld)],
+                       foreground=[("disabled", dfg), ("readonly", fg),
+                                   ("focus", fg)],
+                       selectforeground=[("readonly", fg)],
+                       selectbackground=[("readonly", _fld)])
+        except Exception as e:
+            _log_fail("fields", e)
+        try:
+            # sv_ttk's tk_setPalette stuffs the option db, so every field
+            # is BORN with a widget-level foreground frozen at the boot
+            # theme -- and a widget-level option beats the style forever
+            # (invisible text once the page brightness flips). Clear it
+            # everywhere; live ghost hints get the theme-aware muted tone.
+            gset = getattr(self, "_ghost_fields", set())
+            gfg = self._ghost_fg()
+            stack = [self.root]
+            while stack:
+                w = stack.pop()
+                stack.extend(w.winfo_children())
+                if w.winfo_class() in ("TEntry", "TCombobox", "TSpinbox"):
+                    try:
+                        w.configure(foreground=(gfg if w in gset else ""))
+                    except tk.TclError:
+                        pass
+        except Exception as e:
+            _log_fail("unfreeze", e)
+        try:
+            # and future widgets: out-specific tk_setPalette's *foreground
+            # so new fields are born deferring to the style
+            for cls in ("TEntry", "TCombobox", "TSpinbox"):
+                self.root.option_add("*%s.foreground" % cls, "")
+        except Exception as e:
+            _log_fail("optdefault", e)
+        try:
+            # combobox dropdown list (a tk Listbox via the option db)
+            self.root.option_add("*TCombobox*Listbox.background", _fld)
+            self.root.option_add("*TCombobox*Listbox.foreground", fg)
+            self.root.option_add("*TCombobox*Listbox.selectBackground", fg)
+            self.root.option_add("*TCombobox*Listbox.selectForeground", _fld)
+        except Exception as e:
+            _log_fail("optiondb", e)
+        try:
+            self._sync_combo_popdowns(_fld, fg)
+        except Exception as e:
+            _log_fail("popdowns", e)
+
+    def _ghost_fg(self):
+        """Muted hint color readable on the themed FIELD background."""
+        try:
+            _u, fg, fld, _pb, _pf = self._theme_palette()
+            return self._blendc(fg, fld, 0.5)
+        except Exception:
+            return "#888888"
+
+    def _ghost_mark(self, w, on):
+        """Track entries currently showing ghost/hint text so theme
+        switches can re-tint them instead of wiping them readable."""
+        gs = getattr(self, "_ghost_fields", None)
+        if gs is None:
+            gs = self._ghost_fields = set()
+        (gs.add if on else gs.discard)(w)
 
     def _auto_body_size(self):
         """Default interface text size from the screen: 12 on a roomy
@@ -2509,8 +2610,19 @@ class App:
         self._theming = True
         try:
             self._toggle_dark_inner()
+        except Exception as e:
+            # a mid-switch failure used to die silently in the var trace
+            # and leave the app half-themed (unreadable fields)
+            try:
+                self._logline("! theme switch failed midway: %r" % e)
+            except Exception:
+                pass
         finally:
             self._theming = False
+            try:
+                self._pin_field_styles()   # ALWAYS the final act
+            except Exception:
+                pass
 
     def _toggle_dark_inner(self):
         self._init_theme()
@@ -4610,7 +4722,8 @@ class App:
                 self._ph_active = True
                 self.section_search.set(_ph_text)
                 try:
-                    se.configure(foreground="#888888")
+                    self._ghost_mark(se, True)
+                    se.configure(foreground=self._ghost_fg())
                 except tk.TclError:
                     pass
 
@@ -4619,6 +4732,7 @@ class App:
                 self._ph_active = False
                 self.section_search.set("")
                 try:
+                    self._ghost_mark(se, False)
                     se.configure(foreground="")
                 except tk.TclError:
                     pass
@@ -6935,7 +7049,11 @@ class App:
             "2.  Set the separator (and prefix, decimal, keywords), then "
             "pick a real filename under 'Teach by example' and label "
             "each piece with the dropdown beneath it. Pick 'ignore' for "
-            "pieces that don't matter.\n"
+            "pieces that don't matter. The prefix, the gray separators "
+            "and the segment suffix all show in place; click a gray "
+            "piece to jump to its grammar box, and the prefix piece's "
+            "own dropdown can turn it back into a normal labeled "
+            "piece.\n"
             "3.  Watch the preview: green rows parse, red rows don't "
             "(the note says why). When the 'matched N / N' count "
             "satisfies your working requirements, click 'Use this "
@@ -6949,15 +7067,29 @@ class App:
             "  s = channel keyword (OPTIONAL; none = dark)\n"
             "  c = compression tag (OPTIONAL; d = decompression)\n"
             "  2 = retake number (OPTIONAL)\n"
-            "  .003 = grating segment (OPTIONAL; none = single-stitch)\n"
+            "  .003 = grating segment ('No number =' says what a name "
+            "without one means)\n"
             "  Grammar boxes: separator '-', pressure decimal '.',"
             "  strip units 'gpa', sample keyword 's'.\n\n"
+            "SEGMENT NUMBERING\n"
+            "Segment sep is the text before the segment number; it may be "
+            "several characters ('_seg' reads name_seg003) and blank means "
+            "your files have no segment numbers. Numbering digits reads "
+            ".001 or .1 (padding-agnostic); letters reads .a as "
+            "1, .b as 2 (case does not matter). 'No number =' is the "
+            "segment index a bare name gets (usually 1), or 'reject' to "
+            "skip bare names.\n\n"
             "FIXING ODD FILES\n"
             "Double-click any red row to type its fields by hand, or "
             "select it and press 'Exclude selected'. Fixes are "
             "remembered for this folder and persist across restarts. "
             "A fixed row shows in blue.\n\n"
             "DETAILS\n"
+            "- Default DAC / sample fill a piece the names never show "
+            "(single-cell folders): set the default and drop that label "
+            "from the order.\n"
+            "- The separator box accepts comma-separated "
+            "alternatives: '_,-' splits on either.\n"
             "- A missing pressure piece reads as 0 GPa.\n"
             "- Files with no role keyword count as dark.\n"
             "- '12p5' means 12.5 when the decimal character is 'p'.\n"
@@ -7001,9 +7133,10 @@ class App:
         _ced.pack(fill="x", padx=10, pady=(4, 2))
         _ced.set_title(self._lf_header(_ced, "Grammar"))
         ed = _ced.body
-        r1 = ttk.Frame(ed); r1.pack(fill="x")
         v_prefix = tk.StringVar(); v_sep = tk.StringVar()
-        v_seqsep = tk.StringVar(); v_dec = tk.StringVar()
+        v_seqsep = tk.StringVar(); v_seqscheme = tk.StringVar()
+        v_seqmiss = tk.StringVar(); v_ddac = tk.StringVar()
+        v_dsam = tk.StringVar(); v_dec = tk.StringVar()
         v_units = tk.StringVar(); v_bg = tk.StringVar(); v_s = tk.StringVar()
         v_dk = tk.StringVar(); v_c = tk.StringVar(); v_d = tk.StringVar()
 
@@ -7020,7 +7153,8 @@ class App:
                     ghosted[key] = True
                     var.set(ghost)
                     try:
-                        entry.configure(foreground="#888888")
+                        self._ghost_mark(entry, True)
+                        entry.configure(foreground=self._ghost_fg())
                     except tk.TclError:
                         pass
             def hide(_e=None):
@@ -7028,6 +7162,7 @@ class App:
                     ghosted[key] = False
                     var.set("")
                     try:
+                        self._ghost_mark(entry, False)
                         entry.configure(foreground="")
                     except tk.TclError:
                         pass
@@ -7043,6 +7178,7 @@ class App:
                 key = id(var_)
                 ghosted[key] = False
                 try:
+                    self._ghost_mark(ent_, False)
                     ent_.configure(foreground="")
                 except tk.TclError:
                     pass
@@ -7050,7 +7186,8 @@ class App:
                     ghosted[key] = True
                     var_.set(gh_)
                     try:
-                        ent_.configure(foreground="#888888")
+                        self._ghost_mark(ent_, True)
+                        ent_.configure(foreground=self._ghost_fg())
                     except tk.TclError:
                         pass
 
@@ -7062,50 +7199,76 @@ class App:
                       "(the classic names start with 'vis'). Leave blank "
                       "if your names have no fixed prefix.",
             "Separator": "The character between pieces of the name, "
-                         "usually _ or -",
-            "Segment sep": "The character before the grating-segment "
-                           "number at the very end (vis_....001 uses '.'). "
-                           "Blank if your files have no segment numbers.",
+                         "usually _ or -. Several alternatives? "
+                         "Comma-separate them: '_,-' splits on either.",
         }
+        _gram_entries = {}
+        r1 = ttk.Frame(ed); r1.pack(fill="x")
         for lab, var, w, gh in (("Prefix", v_prefix, 6, "vis"),
-                                ("Separator", v_sep, 4, "_"),
-                                ("Segment sep", v_seqsep, 4, ".")):
+                                ("Separator", v_sep, 4, "_")):
             self._lbl(r1, text=lab).pack(side="left")
             e_ = ttk.Entry(r1, textvariable=var, width=w)
-            e_.pack(side="left", padx=(2, 10))
+            e_.pack(side="left", padx=(2, 10), fill="x", expand=True)
             Tooltip(e_, _tips[lab])
             _ghost(e_, var, gh)
+            _gram_entries[lab] = e_
         self._lbl(r1, text="Pressure decimal").pack(side="left")
         dcb = ttk.Combobox(r1, textvariable=v_dec, state="readonly", width=3,
                            values=["p", ".", ","])
-        dcb.pack(side="left", padx=(2, 10))
+        dcb.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(dcb, "The character standing in for the decimal point in "
                      "the pressure piece: 'p' reads 12p5 as 12.5; '.' reads "
                      "12.5 directly.")
         self._lbl(r1, text="Strip units").pack(side="left")
         ue = ttk.Entry(r1, textvariable=v_units, width=9)
-        ue.pack(side="left", padx=(2, 0))
+        ue.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(ue, "Unit text to remove from the end of the pressure piece "
                     "before reading the number, comma-separated: gpa,kbar "
                     "reads '15.3GPa' as 15.3.")
         _ghost(ue, v_units, "gpa")
+        r1b = ttk.Frame(ed); r1b.pack(fill="x", pady=(4, 0))
+        self._lbl(r1b, text="Segment sep").pack(side="left")
+        sqe = ttk.Entry(r1b, textvariable=v_seqsep, width=6)
+        sqe.pack(side="left", padx=(2, 10), fill="x", expand=True)
+        Tooltip(sqe, "The text before the grating-segment number at the "
+                     "very end of the name (vis_....001 uses '.'). May be "
+                     "several characters: '_seg' reads name_seg003. The "
+                     "rightmost occurrence splits the name. Blank = your "
+                     "files carry no segment numbers at all.")
+        self._lbl(r1b, text="Numbering").pack(side="left")
+        _SCHEME_LABELS = {"digits": "digits  (.001, .2)",
+                          "letters": "letters  (.a, .b)"}
+        sqc = ttk.Combobox(r1b, textvariable=v_seqscheme, state="readonly",
+                           width=16, values=list(_SCHEME_LABELS.values()))
+        sqc.pack(side="left", padx=(2, 10), fill="x", expand=True)
+        Tooltip(sqc, "How segments are numbered after the separator: "
+                     "digits (.001 or .1 - padding-agnostic) or "
+                     "letters (.a = 1, .b = 2, case-insensitive).")
+        self._lbl(r1b, text="No number =").pack(side="left")
+        sqm = ttk.Entry(r1b, textvariable=v_seqmiss, width=6)
+        sqm.pack(side="left", padx=(2, 6), fill="x", expand=True)
+        Tooltip(sqm, "What a name WITHOUT a segment suffix means: a "
+                     "segment index (usually 1), or 'reject' to skip such "
+                     "files with a note in the preview.")
+        self._lbl(r1b, text="(an index, or 'reject')", foreground="#888",
+                  font=self._F(-1)).pack(side="left")
         r2 = ttk.Frame(ed); r2.pack(fill="x", pady=(4, 0))
         self._lbl(r2, text="Background keyword(s)").pack(side="left")
         bge = ttk.Entry(r2, textvariable=v_bg, width=10)
-        bge.pack(side="left", padx=(2, 10))
+        bge.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(bge, "The piece that marks a BACKGROUND file (classic "
                      "names use 'bg'). Several alternatives: comma-separate "
                      "them (bg,ref).")
         _ghost(bge, v_bg, "bg")
         self._lbl(r2, text="Sample keyword(s)").pack(side="left")
         se_ = ttk.Entry(r2, textvariable=v_s, width=10)
-        se_.pack(side="left", padx=(2, 10))
+        se_.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(se_, "The piece that marks a SAMPLE file (classic names "
                      "use 's'). Several alternatives: comma-separate them.")
         _ghost(se_, v_s, "s")
         self._lbl(r2, text="Dark keyword(s)").pack(side="left")
         dke = ttk.Entry(r2, textvariable=v_dk, width=10)
-        dke.pack(side="left", padx=(2, 10))
+        dke.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(dke, "Optional piece that explicitly marks a DARK file "
                      "(e.g. 'dark'). Files with NO keyword also count as "
                      "dark, so this can stay empty.")
@@ -7115,20 +7278,33 @@ class App:
         r3 = ttk.Frame(ed); r3.pack(fill="x", pady=(4, 0))
         self._lbl(r3, text="Compression keyword(s)").pack(side="left")
         ce_ = ttk.Entry(r3, textvariable=v_c, width=10)
-        ce_.pack(side="left", padx=(2, 10))
+        ce_.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(ce_, "The piece that marks a COMPRESSION point (classic "
                      "names use 'c', shown as C on the plot). Several "
                      "alternatives: comma-separate them.")
         _ghost(ce_, v_c, "c")
         self._lbl(r3, text="Decompression keyword(s)").pack(side="left")
         de_ = ttk.Entry(r3, textvariable=v_d, width=10)
-        de_.pack(side="left", padx=(2, 10))
+        de_.pack(side="left", padx=(2, 10), fill="x", expand=True)
         Tooltip(de_, "The piece that marks a DECOMPRESSION point (classic "
                      "names use 'd', shown as D and dashed on the plot). "
                      "Several alternatives: comma-separate them.")
         _ghost(de_, v_d, "d")
         self._lbl(r3, text="(the C / D tag; optional)", foreground="#888",
                   font=self._F(-1)).pack(side="left")
+        r4 = ttk.Frame(ed); r4.pack(fill="x", pady=(4, 0))
+        self._lbl(r4, text="Default DAC Name").pack(side="left")
+        dde = ttk.Entry(r4, textvariable=v_ddac, width=10)
+        dde.pack(side="left", padx=(2, 10), fill="x", expand=True)
+        Tooltip(dde, "Used when the names carry no DAC piece (single-cell "
+                     "folders): put the cell name here and drop 'dac' from "
+                     "the labels under Teach by example.")
+        self._lbl(r4, text="Default Sample Name").pack(side="left")
+        dse = ttk.Entry(r4, textvariable=v_dsam, width=10)
+        dse.pack(side="left", padx=(2, 10), fill="x", expand=True)
+        Tooltip(dse, "Used when the names carry no sample piece: put the "
+                     "sample name here and drop 'sample' from the labels "
+                     "under Teach by example.")
 
         # -- teach by example --------------------------------------------------
         _cex = self._card(main)
@@ -7147,10 +7323,32 @@ class App:
                       "pieces below. Pick one that shows EVERY part of your "
                       "scheme (pressure, channel keyword, ...) so each "
                       "piece can be labeled.")
-        chipf = ttk.Frame(exf); chipf.pack(fill="x", pady=(6, 0))
-        ordlbl = self._lbl(exf, text="", foreground="#888",
-                           font=self._F(-1))
-        ordlbl.pack(anchor="w", pady=(4, 0))
+        # the chip strip can outgrow the card (prefix + separators +
+        # segment suffix); ride it in a canvas with a scrollbar that
+        # appears only when needed
+        chip_cv = tk.Canvas(exf, height=1, highlightthickness=0,
+                            background=self._theme_palette()[0])
+        chip_cv.pack(fill="x", pady=(6, 0))
+        chipf = ttk.Frame(chip_cv)
+        chip_cv.create_window((0, 0), window=chipf, anchor="nw")
+        chip_sb = ttk.Scrollbar(exf, orient="horizontal",
+                                command=chip_cv.xview)
+        chip_cv.configure(xscrollcommand=chip_sb.set)
+
+        def _chip_sync(_e=None):
+            try:
+                chip_cv.configure(scrollregion=chip_cv.bbox("all") or
+                                  (0, 0, 0, 0),
+                                  height=chipf.winfo_reqheight())
+                need = chipf.winfo_reqwidth() > chip_cv.winfo_width()
+                if need and not chip_sb.winfo_ismapped():
+                    chip_sb.pack(fill="x")
+                elif not need and chip_sb.winfo_ismapped():
+                    chip_sb.forget()
+            except tk.TclError:
+                pass
+        chipf.bind("<Configure>", _chip_sync)
+        chip_cv.bind("<Configure>", _chip_sync)
 
         # -- preview -----------------------------------------------------------
         _cpv = self._card(main, grow="both")
@@ -7279,6 +7477,12 @@ class App:
                 v_prefix.set(p.get("prefix", ""))
                 v_sep.set(p.get("sep", "_"))
                 v_seqsep.set(p.get("seq_sep", "."))
+                _sch = str(p.get("seq_scheme", "digits"))
+                v_seqscheme.set(_SCHEME_LABELS.get(_sch, _sch))
+                v_seqmiss.set(str(p.get("seq_missing", 1)))
+                dfl = p.get("defaults") or {}
+                v_ddac.set(str(dfl.get("dac", "") or ""))
+                v_dsam.set(str(dfl.get("sample", "") or ""))
                 v_dec.set(p.get("pressure_decimal", "p"))
                 v_units.set(",".join(p.get("pressure_unit_strip", ["gpa"])))
                 rm = p.get("role_map", {})
@@ -7299,7 +7503,23 @@ class App:
             p = st["profile"]
             p["prefix"] = V(v_prefix).strip()
             p["sep"] = V(v_sep) or "_"
-            p["seq_sep"] = V(v_seqsep)
+            p["seq_sep"] = v_seqsep.get()
+            p["seq_scheme"] = (v_seqscheme.get().split() or ["digits"])[0]
+            sm = v_seqmiss.get().strip().lower()
+            if sm == "reject":
+                p["seq_missing"] = "reject"
+            else:
+                try:
+                    p["seq_missing"] = int(sm)
+                except ValueError:
+                    p["seq_missing"] = sm or 1  # junk: the validator says so
+            dfl = dict(p.get("defaults") or {})
+            for key_, var_ in (("dac", v_ddac), ("sample", v_dsam)):
+                if var_.get().strip():
+                    dfl[key_] = var_.get().strip()
+                else:
+                    dfl.pop(key_, None)
+            p["defaults"] = dfl
             p["pressure_decimal"] = v_dec.get() or "p"
             p["pressure_unit_strip"] = [u.strip() for u in
                                         V(v_units).split(",") if u.strip()]
@@ -7338,7 +7558,6 @@ class App:
                 self._lbl(chipf, text="The built-in grammar is fixed. Pick "
                           "or save a custom profile to edit.",
                           foreground="#888").pack(anchor="w")
-                ordlbl.config(text="")
                 refresh_preview()
                 return
             vars_to_profile()
@@ -7346,17 +7565,95 @@ class App:
             name = v_ex.get()
             if name.lower().endswith(".csv"):
                 name = name[:-4]
-            ss = p.get("seq_sep", ".")
+            ss = p.get("seq_sep") or ""
+            sch = str(p.get("seq_scheme") or "digits").lower()
+            sep_alts = engine.sep_alternatives(p.get("sep", "_"))
+            seg_txt, seg_val, seg_note, seg_jump = None, None, None, None
             if ss and ss in name:
                 base, tail = name.rsplit(ss, 1)
-                if tail.isdigit():
-                    name = base
-            toks = [t for t in name.split(p.get("sep", "_")) if t != ""]
+                v = engine.seq_from_suffix(tail, sch)
+                if v is not None and base:
+                    name, seg_txt, seg_val = base, ss + tail, v
+                    seg_note = "grating segment = %d" % v
+            if seg_txt is None:
+                # a tail that WOULD be a segment under other settings is
+                # still separated, with a caption naming the knob to fix
+                cands = ([ss] if ss else []) + \
+                    [c for c in (".", "-", "_", "_seg", "-seg")
+                     if c != ss and c not in sep_alts]
+                for cs in cands:
+                    got = None
+                    if cs and cs in name:
+                        b2, t2 = name.rsplit(cs, 1)
+                        for sch2 in ("digits", "letters"):
+                            if b2 and engine.seq_from_suffix(
+                                    t2, sch2) is not None:
+                                got = (b2, t2, sch2)
+                                break
+                    if not got:
+                        continue
+                    b2, t2, sch2 = got
+                    name, seg_txt = b2, cs + t2
+                    seg_val = engine.seq_from_suffix(t2, sch2)
+                    if cs == ss:
+                        seg_note = "segment? set Numbering: %s" % sch2
+                        seg_jump = "scheme"
+                    else:
+                        seg_note = "segment? set Segment sep: '%s'" % cs
+                        if sch2 != sch:
+                            seg_note += " + %s" % sch2
+                        seg_jump = "sep"
+                    break
+            toks, gaps = engine.split_tokens_gaps(
+                name, p.get("sep", "_") or "_")
             pref = p.get("prefix", "")
+            pref_tok, pref_gap = None, ""
             if pref and toks and toks[0].lower() == pref.lower():
+                pref_tok = toks[0]
                 toks = toks[1:]
+                if gaps:
+                    pref_gap, gaps = gaps[0], gaps[1:]
             order = list(p.get("order", []))
+
+            def _sep_chip(txt):
+                # the literal separator found between these two pieces
+                sl = self._lbl(chipf, text=txt, foreground="#888",
+                               font=self._F(1, "bold", mono=True))
+                sl.pack(side="left", padx=1, anchor="n")
+                Tooltip(sl, "Separator between pieces (the 'Separator' "
+                            "box above). Click to edit it.")
+                sl.bind("<Button-1>", lambda e:
+                        _gram_entries["Separator"].focus_set())
+
+            if pref_tok is not None:
+                col = ttk.Frame(chipf)
+                col.pack(side="left", padx=2)
+                self._lbl(col, text=pref_tok,
+                          font=self._F(0, "bold", mono=True)).pack()
+                pfv = tk.StringVar(value="prefix")
+                pfc = ttk.Combobox(col, textvariable=pfv, state="readonly",
+                                   width=8, values=["prefix"] +
+                                   list(engine.FIELD_CHOICES))
+                pfc.pack()
+                Tooltip(pfc, "'%s' is the fixed prefix (the 'Prefix' box "
+                             "above). Pick a field instead to stop "
+                             "treating it as a prefix and label it like "
+                             "any other piece." % pref_tok)
+
+                def _prefix_change(*_a):
+                    sel = pfv.get()
+                    if sel == "prefix" or st.get("loading"):
+                        return
+                    st["profile"]["order"] = ([sel] + list(
+                        st["profile"].get("order", [])))
+                    ghosted[id(v_prefix)] = False
+                    v_prefix.set("")     # its trace rebuilds the chips
+                pfv.trace_add("write", _prefix_change)
             for i, tok in enumerate(toks):
+                if i:
+                    _sep_chip(gaps[i - 1] if i - 1 < len(gaps) else "?")
+                elif pref_tok is not None:
+                    _sep_chip(pref_gap or "?")
                 col = ttk.Frame(chipf)
                 col.pack(side="left", padx=2)
                 self._lbl(col, text=tok, font=self._F(0, "bold", mono=True)
@@ -7372,6 +7669,27 @@ class App:
                             "/ rep (retake number) - or ignore." % tok)
                 fv.trace_add("write", lambda *a: chips_to_order())
                 st["chips"].append(fv)
+            if seg_txt is not None:
+                col = ttk.Frame(chipf)
+                col.pack(side="left", padx=(6, 2))
+                sgt = self._lbl(col, text=seg_txt,
+                                font=self._F(0, "bold", mono=True))
+                sgt.pack()
+                sgl = self._lbl(col, text=seg_note,
+                                foreground="#888", font=self._F(-1))
+                sgl.pack()
+                _jump = sqc if seg_jump == "scheme" else sqe
+                for w_ in (sgt, sgl):
+                    Tooltip(w_, ("The grating-segment suffix, read with "
+                                 "the Segment sep / Numbering boxes "
+                                 "above. Click to jump to that box.")
+                            if seg_jump is None else
+                            ("This tail looks like a segment number but "
+                             "the current settings do not read it; the "
+                             "caption names the box to change. Click to "
+                             "jump there."))
+                    w_.bind("<Button-1>",
+                            lambda e, w=_jump: w.focus_set())
             chips_to_order(refresh_only=True)
 
         def chips_to_order(refresh_only=False):
@@ -7381,9 +7699,6 @@ class App:
                 if len(old) > len(new):
                     new += old[len(new):]     # keep fields no visible token
                 st["profile"]["order"] = new  # showed (richer files use them)
-            ordlbl.config(text="Order: " +
-                          " > ".join(st["profile"].get("order", []))
-                          if not st["builtin"] else "")
             refresh_preview()
 
         def refresh_preview(*_a):
@@ -7448,7 +7763,7 @@ class App:
 
         def _set_editor_state():
             s = "disabled" if st["builtin"] else "normal"
-            for fr in (r1, r2, r3):
+            for fr in (r1, r1b, r2, r3, r4):
                 for w in fr.winfo_children():
                     try:
                         w.configure(state=("readonly" if s == "normal" and
@@ -7576,7 +7891,8 @@ class App:
 
         pvar.trace_add("write", on_pick_profile)
         v_ex.trace_add("write", rebuild_chips)
-        for var in (v_prefix, v_sep, v_seqsep, v_dec, v_units, v_bg, v_s,
+        for var in (v_prefix, v_sep, v_seqsep, v_seqscheme, v_seqmiss,
+                    v_ddac, v_dsam, v_dec, v_units, v_bg, v_s,
                     v_dk, v_c, v_d):
             var.trace_add("write",
                           lambda *a: (not st["builtin"]
@@ -9089,6 +9405,15 @@ class App:
 
     def _redraw_now(self):
         self._redraw_after = None
+        if not self._fields_healthy():     # self-heal stale theme styles
+            try:
+                self._logline("! field styles were stale -- repinned")
+            except Exception:
+                pass
+            try:
+                self._pin_field_styles()
+            except Exception:
+                pass
         if not getattr(self, "_xy_sync_cid", None):
             try:
                 self._xy_sync_cid = self.fig.canvas.mpl_connect(
@@ -9587,6 +9912,22 @@ class App:
                 pass
         except Exception:
             pass
+
+    def _fields_healthy(self):
+        """True when the themed field styles are in effect: the resolved
+        TEntry foreground matches the palette AND the sentinel widget
+        carries no frozen widget-level foreground (tk_setPalette birth
+        defect) that would override it."""
+        try:
+            if (str(ttk.Style().lookup("TEntry", "foreground"))
+                    != str(self._theme_palette()[1])):
+                return False
+            cb = getattr(self, "cmap_cb", None)
+            if cb is not None and str(cb.cget("foreground")):
+                return False
+            return True
+        except Exception:
+            return True
 
     def _fw(self, var):
         try:
@@ -11093,7 +11434,8 @@ class App:
             "  allowed and a missing pressure field is assumed 0 GPa\n"
             "  .{seq} = grating segment; omit it for single-stitch files\n"
             "  Incomplete channel sets (e.g. bg only) load as raw counts\n"
-            "  Any other scheme: teach it in 'Name format', or let Guess\n"
+            "  Any other scheme (own separators, letter segments, default\n"
+            "  DAC/sample): teach it in 'Name format', or let Guess\n"
             "  format read the folder; hand fixes are remembered per folder.\n\n"
             "TIPS\n"
             "  - Waterfall box: off / 2D stacked / 3D ridge plot modes.\n"
@@ -11193,7 +11535,7 @@ class App:
         # "undo" back into the previous session
         self._undo_stack = []; self._redo_stack = []
         try:
-            self._undo_stack.append(self._snapshot())
+            self._undo_stack.append(("initial", self._snapshot()))
         except Exception:
             pass
         self._update_undo_buttons()

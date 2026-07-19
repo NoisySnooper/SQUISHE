@@ -214,3 +214,166 @@ def test_health_saturation_warns():
          "dark_c": np.zeros(200)}
     flags = engine.health_flags(r)
     assert any("saturated" in m for _l, m in flags)
+
+
+# ---- segment numbering (seq_sep / seq_scheme / seq_missing) -----------------
+
+def _seg_profile(**kw):
+    p = engine.default_profile("seg")
+    p["prefix"] = ""
+    p["sep"] = "-"
+    p["pressure_decimal"] = "."
+    p.update(kw)
+    return p
+
+
+def test_segment_padding_equivalent():
+    p = _seg_profile()
+    a = engine.parse_with_profile("D42-fo90.1", p)
+    b = engine.parse_with_profile("D42-fo90.001", p)
+    assert a["seq"] == b["seq"] == 1
+    assert engine.parse_with_profile("D42-fo90.012", p)["seq"] == 12
+
+
+def test_segment_multichar_separator():
+    p = _seg_profile(seq_sep="_seg")
+    r = engine.parse_with_profile("D42-fo90_seg003", p)
+    assert not r.get("skip") and r["seq"] == 3
+    # rightmost occurrence splits, and a dotted pressure survives intact
+    r = engine.parse_with_profile("D42-fo90-2.5_seg7", p)
+    assert not r.get("skip") and r["seq"] == 7
+    assert abs(r["pressure_val"] - 2.5) < 1e-9
+
+
+def test_segment_letters_scheme():
+    p = _seg_profile(seq_scheme="letters")
+    assert engine.parse_with_profile("D42-fo90.a", p)["seq"] == 1
+    assert engine.parse_with_profile("D42-fo90.B", p)["seq"] == 2   # case
+    assert engine.parse_with_profile("D42-fo90.aa", p)["seq"] == 27
+    # a plain data extension must NOT read as a segment (len cap):
+    # '.dat' stays in the token and the file counts as suffix-less
+    r = engine.parse_with_profile("D42-fo90.dat", p)
+    assert r["seq"] == 1 and r["sample"] == "fo90.dat"
+
+
+def test_segment_missing_reject():
+    p = _seg_profile(seq_missing="reject")
+    r = engine.parse_with_profile("D42-fo90", p)
+    assert r.get("skip") and "segment" in r.get("reason", "")
+    r = engine.parse_with_profile("D42-fo90.2", p)
+    assert not r.get("skip") and r["seq"] == 2
+
+
+def test_segment_empty_separator():
+    p = _seg_profile(seq_sep="")
+    r = engine.parse_with_profile("D42-fo90", p)
+    assert not r.get("skip") and r["seq"] == 1
+    # nothing is split off: a dotted tail stays part of the token
+    r = engine.parse_with_profile("D42-fo90.001", p)
+    assert not r.get("skip") and r["seq"] == 1 and r["sample"] == "fo90.001"
+
+
+def test_segment_missing_custom_index():
+    p = _seg_profile(seq_missing=4)
+    assert engine.parse_with_profile("D42-fo90", p)["seq"] == 4
+    assert engine.parse_with_profile("D42-fo90.2", p)["seq"] == 2
+
+
+def test_segment_validator():
+    assert engine.validate_profile(_seg_profile()) == []
+    assert any("scheme" in s for s in
+               engine.validate_profile(_seg_profile(seq_scheme="roman")))
+    assert any("whole number" in s for s in
+               engine.validate_profile(_seg_profile(seq_missing=0)))
+    assert any("whole number" in s for s in
+               engine.validate_profile(_seg_profile(seq_missing="maybe")))
+    assert any("separator" in s for s in
+               engine.validate_profile(_seg_profile(seq_sep="",
+                                                    seq_missing="reject")))
+    assert engine.validate_profile(_seg_profile(seq_missing="reject")) == []
+
+
+def test_guess_detects_letter_segments():
+    names = ["run_D1_x_10.5_s.a", "run_D1_x_10.5_bg.a",
+             "run_D1_x_10.5_s.b", "run_D1_x_10.5_bg.b",
+             "run_D1_x_12_s.a", "run_D1_x_12_bg.a"]
+    prof, n = engine.guess_profile(names)
+    assert prof["seq_sep"] == "." and prof["seq_scheme"] == "letters"
+    assert prof["seq_missing"] == "reject"     # every file was numbered
+    assert n == len(names)
+    r = engine.parse_with_profile("run_D1_x_10.5_s.b", prof)
+    assert not r.get("skip") and r["seq"] == 2
+
+
+def test_guess_partial_coverage_keeps_default_missing():
+    names = ["run_D1_x_10.5_s.001", "run_D1_x_10.5_s.002",
+             "run_D1_x_10.5_bg.001", "run_D1_x_10.5_bg.002",
+             "run_D1_x_12_s", "run_D1_x_12_bg"]
+    prof, n = engine.guess_profile(names)
+    assert prof["seq_sep"] == "." and prof["seq_scheme"] == "digits"
+    assert prof["seq_missing"] == 1            # bare names exist -> seg 1
+    assert n == len(names)
+
+
+def test_override_sets_segment_index():
+    p = _seg_profile()
+    rec = engine.parse_with_profile("D42-fo90.001", p)
+    fixed = engine.apply_override(rec, {"seq": "5"})
+    assert fixed["seq"] == 5 and not fixed.get("skip")
+
+
+# ---- dac / sample omissible via defaults ------------------------------------
+
+def test_defaulted_dac_and_sample():
+    p = _seg_profile()
+    p["order"] = ["sample", "pressure", "role", "branch", "rep"]
+    p["defaults"] = dict(p["defaults"], dac="D42")
+    assert engine.validate_profile(p) == []
+    r = engine.parse_with_profile("fo90-12.5-s.001", p)
+    assert not r.get("skip")
+    assert r["dac"] == "D42" and r["sample"] == "fo90"
+    p2 = _seg_profile()
+    p2["order"] = ["pressure", "role"]
+    p2["defaults"] = dict(p2["defaults"], dac="D42", sample="fo90")
+    r = engine.parse_with_profile("12.5-s.002", p2)
+    assert not r.get("skip")
+    assert (r["dac"], r["sample"], r["seq"]) == ("D42", "fo90", 2)
+
+
+def test_missing_dac_without_default_is_flagged():
+    p = _seg_profile()
+    p["order"] = ["sample", "pressure"]
+    probs = engine.validate_profile(p)
+    assert any("dac" in s for s in probs)
+    p["defaults"] = dict(p["defaults"], dac="D42")
+    assert engine.validate_profile(p) == []
+
+
+# ---- separator alternatives + guesser retry ---------------------------------
+
+def test_separator_alternatives():
+    p = _seg_profile(sep="_,-")
+    r = engine.parse_with_profile("D42-fo90_10.5-bg.001", p)
+    assert not r.get("skip")
+    assert (r["dac"], r["sample"], r["meas"]) == ("D42", "fo90",
+                                                  "background")
+    assert abs(r["pressure_val"] - 10.5) < 1e-9 and r["seq"] == 1
+    toks, gaps = engine.split_tokens_gaps("D42-fo90_10.5-bg", "_,-")
+    assert toks == ["D42", "fo90", "10.5", "bg"]
+    assert gaps == ["-", "_", "-"]
+
+
+def test_separator_literal_comma():
+    assert engine.split_tokens("a,b,c", ",") == ["a", "b", "c"]
+
+
+def test_guess_single_cell_no_prefix():
+    names = ["D42_ol1_10p5_bg.001", "D42_ol1_10p5_bg.002",
+             "D42_ol1_10p5_s.001", "D42_ol1_10p5_s.002",
+             "D42_ol1_12p0_bg.001", "D42_ol1_12p0_s.001"]
+    prof, n = engine.guess_profile(names)
+    # the shared dac token must NOT be eaten as a prefix
+    assert prof["prefix"] == "" and n == len(names)
+    r = engine.parse_with_profile(names[0], prof)
+    assert (r["dac"], r["sample"], r["meas"]) == ("D42", "ol1",
+                                                  "background")

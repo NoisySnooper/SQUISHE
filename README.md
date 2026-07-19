@@ -17,7 +17,10 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   zero setup, and any other naming scheme can be taught from a single example
   file ("Name format" editor: label the pieces of a real filename, watch the
   whole folder validate live, fix or exclude stubborn files by hand, save the
-  grammar as a reusable profile).
+  grammar as a reusable profile). Segment numbering is fully configurable —
+  any separator text (with comma-separated alternatives), digits or
+  letters, and a strict or assume-an-index policy for suffix-less names — and single-cell folders can default the
+  DAC / sample instead of naming them in every file.
 - **Removes diamond-anvil interference fringes** (FFT-notch defringe with a
   Fisher g-test acceptance gate) and applies the lab's 5-step
   Savitzky-Golay smoothing pipeline.
@@ -44,6 +47,27 @@ spectra from diamond-anvil-cell experiments (developed for NSLS-II beamline
   icon set, themed title bar and top banner, a named theme set (from clean
   Standard Light and true-black to Rainbow, Coast Guard, and more), and an
   adjustable interface text size.
+
+## New in v1.4.7
+
+- **Full control of segment numbering**: a custom name format now decides
+  how grating segments are numbered. The separator can be any text
+  (`.`, `-`, multi-character like `_seg`, or several comma-separated
+  alternatives such as `_,-`); numbering is digits (`.001` and `.1` read
+  alike, padding-agnostic) or letters (`.a` = 1, `.b` = 2,
+  case-insensitive); and a name *without* a segment suffix takes a chosen
+  index (default 1) or is rejected with a logged reason. A blank
+  separator means the convention has no segment numbers at all. "Guess
+  format" detects the folder's segment convention on its own, and the
+  per-file Fix dialog can override the segment index by hand.
+- **Teach by example, decomposed**: the Name-format editor now shows the
+  prefix, every separator, and the segment suffix in place, each labeled,
+  so an unfamiliar filename scheme is legible at a glance.
+- **Default DAC / sample**: single-cell folders whose names never carry a
+  DAC (or sample) piece can drop that token from the order and supply the
+  value as a profile default instead.
+- **Readable fields in every theme**: fixed a theme-switch bug that could
+  leave input-box text invisible on light or dark backgrounds.
 
 ## New in v1.4.6
 
@@ -175,6 +199,13 @@ any unsigned exe): More info -> Run anyway.
 
 ## Version history
 
+- **v1.4.7** — full user control of grating-segment numbering in custom
+  name formats (any separator incl. multi-character and comma-separated
+  alternatives, digit or letter schemes, missing-suffix policy incl.
+  reject, guesser detection, per-file segment override); Teach-by-example
+  decomposition (prefix, separators, and segment suffix shown in place);
+  default DAC/sample for tokens the names never show; theme-visibility fix
+  keeping field text readable in every light and dark theme.
 - **v1.4.6** — deep export control (multi-format save, TrueType vector
   text, grayscale check, metadata, styled batch); live X/Y placement
   with pinning for legend/title/colorbar; colorbar docking; per-element

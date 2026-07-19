@@ -26,6 +26,7 @@ NQT / Lee Lab -- Jun 2026
 """
 
 import os
+import re
 import csv
 import json
 import hashlib
@@ -171,10 +172,71 @@ def default_profile(name="custom"):
         "pressure_unit_strip": ["gpa"],
         "role_map": {"bg": "background", "s": "sample", "": "dark"},
         "branch_tokens": {"c": "C", "d": "D"},
-        "seq_sep": ".",              # '<base>.003' -> segment 3
-        "seq_missing": 1,
+        "seq_sep": ".",              # '<base>.003' -> segment 3; "" = none
+        "seq_scheme": "digits",      # or "letters" (a=1, b=2, ...)
+        "seq_missing": 1,            # index for suffix-less names, or "reject"
         "defaults": {"pressure": 0.0, "role": "dark", "rep": 1},
     }
+
+
+def seq_from_suffix(sfx, scheme="digits"):
+    """Decode a segment suffix under a numbering scheme. Returns the
+    integer segment index, or None when the text is not a segment under
+    that scheme. digits: any all-digit run via int(), so zero-padding
+    never matters (.1 == .001). letters: a=1 .. z=26, then aa=27
+    (spreadsheet style), case-insensitive; capped at two letters so a
+    plain data extension (.txt, .dat) can never read as a segment."""
+    s = (sfx or "").strip()
+    if str(scheme or "digits").lower() == "letters":
+        s = s.lower()
+        if not s or len(s) > 2 or not all("a" <= c <= "z" for c in s):
+            return None
+        v = 0
+        for c in s:
+            v = v * 26 + (ord(c) - 96)
+        return v
+    if s.isdigit():
+        return int(s)
+    return None
+
+
+def sep_alternatives(sep):
+    """A profile separator may list comma-separated alternatives
+    ('_,-' splits on either). Returns them longest-first so multi-char
+    alternatives win the regex alternation; a bare ',' means the comma
+    itself is the separator."""
+    parts = [s for s in str(sep or "_").split(",") if s]
+    if not parts:
+        parts = [str(sep)] if sep else ["_"]
+    return sorted(parts, key=len, reverse=True)
+
+
+def split_tokens(name, sep):
+    """Tokenize a name on a separator (or any of its comma-separated
+    alternatives). Empty tokens are dropped, like str.split filtering."""
+    pat = "|".join(re.escape(s) for s in sep_alternatives(sep))
+    return [t for t in re.split(pat, name) if t != ""]
+
+
+def split_tokens_gaps(name, sep):
+    """Like split_tokens but also returns the literal separator text
+    found between consecutive kept tokens (for the teach-by-example
+    strip): (tokens, gaps) with len(gaps) == len(tokens) - 1. Runs of
+    separators around dropped empty tokens merge into one gap."""
+    pat = "(%s)" % "|".join(re.escape(s) for s in sep_alternatives(sep))
+    raw = re.split(pat, name)
+    tokens, gaps, pending = [], [], ""
+    for i, piece in enumerate(raw):
+        if i % 2:                      # a separator match
+            pending += piece
+            continue
+        if piece == "":
+            continue
+        if tokens:
+            gaps.append(pending)
+        tokens.append(piece)
+        pending = ""
+    return tokens, gaps
 
 
 def validate_profile(profile):
@@ -188,14 +250,31 @@ def validate_profile(profile):
     for f in order:
         if f not in FIELD_CHOICES:
             probs.append("unknown field '%s' in order" % f)
+    defaults = profile.get("defaults") or {}
     for req in ("dac", "sample"):
-        if req not in order:
-            probs.append("'%s' missing from token order" % req)
+        if req not in order and not str(defaults.get(req) or "").strip():
+            probs.append("'%s' missing from token order (add the token or "
+                         "give it a default)" % req)
     for k, v in (profile.get("role_map") or {}).items():
         if v not in VALID_MEAS:
             probs.append("role '%s' maps to unknown channel '%s'" % (k, v))
     if "role" in order and not (profile.get("role_map") or {}):
         probs.append("role is in the order but the role map is empty")
+    ss = profile.get("seq_sep")
+    if ss is not None and not isinstance(ss, str):
+        probs.append("segment separator must be text")
+    sch = str(profile.get("seq_scheme") or "digits").lower()
+    if sch not in ("digits", "letters"):
+        probs.append("unknown segment scheme '%s' (use digits or letters)"
+                     % profile.get("seq_scheme"))
+    sm = profile.get("seq_missing", 1)
+    if isinstance(sm, str) and sm.strip().lower() == "reject":
+        if not (profile.get("seq_sep") or ""):
+            probs.append("'reject' needs a segment separator (with a blank "
+                         "separator no file ever has a segment number)")
+    elif isinstance(sm, bool) or not isinstance(sm, int) or sm < 1:
+        probs.append("missing-segment value must be a whole number >= 1 "
+                     "or 'reject'")
     return probs
 
 
@@ -235,22 +314,36 @@ def parse_with_profile(fname, profile=None):
     if name.lower().endswith(".csv"):
         name = name[:-4]
 
-    # A trailing <seq_sep><digits> is the grating-segment index; anything
-    # else after the separator is NOT treated as a segment (permissive:
-    # dotted pressures like '1.5' must survive when seq_sep is '.').
+    # A trailing <seq_sep><suffix> read under seq_scheme (digits or
+    # letters) is the grating-segment index; anything else after the
+    # separator is NOT treated as a segment (permissive: dotted pressures
+    # like '1.5' must survive when seq_sep is '.'). seq_sep may be multi-
+    # character ('_seg'); the RIGHTMOST occurrence splits base from
+    # segment. Empty seq_sep = the convention has no segment suffix.
     # Known ambiguity: if the pressure decimal char equals seq_sep and the
     # name has no real segment suffix ('...-2.5'), the '5' reads as a
     # segment. The dialog's live preview makes this visible; pick a
     # different decimal or segment separator in that case.
-    seq_sep = profile.get("seq_sep", ".")
-    seq = int(profile.get("seq_missing", 1) or 1)
+    seq_sep = profile.get("seq_sep") or ""
+    scheme = profile.get("seq_scheme", "digits")
+    missing = profile.get("seq_missing", 1)
+    seq = None
     if seq_sep and seq_sep in name:
         base, seq_str = name.rsplit(seq_sep, 1)
-        if seq_str.isdigit():
-            seq, name = int(seq_str), base
+        v = seq_from_suffix(seq_str, scheme)
+        if v is not None and base:
+            seq, name = v, base
+    if seq is None:
+        if isinstance(missing, str) and missing.strip().lower() == "reject":
+            return {"skip": True, "raw": raw, "reason":
+                    "no segment suffix ('%s<segment>' required)" % seq_sep}
+        try:
+            seq = int(missing or 1)
+        except (TypeError, ValueError):
+            seq = 1
 
     sep = profile.get("sep", "_") or "_"
-    tokens = [t for t in name.split(sep) if t != ""]
+    tokens = split_tokens(name, sep)
 
     prefix = (profile.get("prefix") or "").strip()
     if prefix:
@@ -270,7 +363,10 @@ def parse_with_profile(fname, profile=None):
     defaults = profile.get("defaults") or {}
 
     p_default = defaults.get("pressure", 0.0)
-    rec = {"dac": "", "sample": "",
+    # dac/sample may be omitted from the order when a default supplies
+    # them (single-cell folders); the order loop overwrites when present
+    rec = {"dac": str(defaults.get("dac", "") or ""),
+           "sample": str(defaults.get("sample", "") or ""),
            "pressure_str": ("%g" % p_default).replace(".", "p"),
            "pressure_val": float(p_default),
            "meas": role_map.get("", defaults.get("role", "dark")),
@@ -310,7 +406,7 @@ def parse_with_profile(fname, profile=None):
                 i += 1
     if i < len(tokens):
         return {"skip": True, "reason": "unrecognized trailing token '%s'"
-                % sep.join(tokens[i:]), "raw": raw}
+                % sep_alternatives(sep)[-1].join(tokens[i:]), "raw": raw}
     if rec["meas"] not in VALID_MEAS:
         return {"skip": True, "reason": "role '%s' is not a valid channel"
                 % rec["meas"], "raw": raw}
@@ -402,14 +498,55 @@ def guess_profile(fnames, name="guessed"):
                   "dark": "dark", "dk": "dark", "drk": "dark"}
     BRANCH_WORDS = {"c": "C", "comp": "C", "up": "C",
                     "d": "D", "dec": "D", "decomp": "D", "down": "D"}
-    bases = []
+    names = []
     for f in fnames:
         n0 = f[:-4] if f.lower().endswith(".csv") else f
+        if n0:
+            names.append(n0)
+    if not names:
+        return default_profile(name), 0
+
+    # segment convention first: score candidate separators x schemes the
+    # same way the token separator is scored below. The strong signal is
+    # the SAME base recurring with several different segment values
+    # (x.001 / x.002); coverage alone is weak (dotted pressures).
+    g_sep, g_scheme, g_missing = "", "digits", 1
+    best_seq_score, best_hits = 0.0, 0
+    for ssep in (".", "-", "_", "_seg", "-seg"):
+        for sch in ("digits", "letters"):
+            groups, hits = {}, 0
+            for n0 in names:
+                if ssep not in n0:
+                    continue
+                b, sfx = n0.rsplit(ssep, 1)
+                v = seq_from_suffix(sfx, sch)
+                if v is None or not b:
+                    continue
+                hits += 1
+                groups.setdefault(b, set()).add(v)
+            if not hits:
+                continue
+            multi = sum(1 for s in groups.values() if len(s) >= 2)
+            score = multi * 2.0 + hits / float(len(names))
+            if multi and score > best_seq_score:
+                g_sep, g_scheme = ssep, sch
+                best_seq_score, best_hits = score, hits
+    if not g_sep:
+        g_sep, g_scheme, g_missing = ".", "digits", 1   # classic default
+    else:
+        # every observed file numbered -> a suffix-less name is off-
+        # convention; partial coverage -> suffix-less means segment 1
+        g_missing = "reject" if best_hits == len(names) else 1
+
+    bases = []
+    for n0 in names:
+        if g_sep and g_sep in n0:
+            b, sfx = n0.rsplit(g_sep, 1)
+            if seq_from_suffix(sfx, g_scheme) is not None and b:
+                n0 = b
         if "." in n0:
             b, ext = n0.rsplit(".", 1)
-            if ext.isdigit():
-                n0 = b
-            elif ext.isalpha() and len(ext) <= 4 and "." not in b:
+            if ext.isalpha() and len(ext) <= 4 and "." not in b:
                 n0 = b          # a plain data extension (.txt, .dat, .asc)
         if n0:
             bases.append(n0)
@@ -427,93 +564,107 @@ def guess_profile(fnames, name="guessed"):
         if score > best_score:
             best_sep, best_score = sep, score
     sep = best_sep
-    toks = [[t for t in b.split(sep) if t] for b in bases]
-    toks = [t for t in toks if t]
-    if not toks:
-        return default_profile(name), 0
-    first = {}
-    for t in toks:
-        k = t[0].lower()
-        first[k] = first.get(k, 0) + 1
-    pfx, pn = max(first.items(), key=lambda kv: kv[1])
-    prefix = ""
-    if pn >= 0.8 * len(toks) and not pfx[0].isdigit() and len(first) <= 2:
-        prefix = pfx
-        toks = [t[1:] if t and t[0].lower() == pfx else t for t in toks]
+    # two passes: a shared first token is normally the prefix, BUT in a
+    # single-cell folder the shared token IS the dac id -- absorbing it
+    # starves the id columns. If the prefixed pass cannot find two id
+    # columns, retry treating no token as a prefix.
+    picked = None
+    for allow_prefix in (True, False):
+        toks = [[t for t in b.split(sep) if t] for b in bases]
         toks = [t for t in toks if t]
         if not toks:
             return default_profile(name), 0
-    ncol = max(len(t) for t in toks)
-    if ncol < 2:
-        return default_profile(name), 0
+        prefix = ""
+        if allow_prefix:
+            first = {}
+            for t in toks:
+                k = t[0].lower()
+                first[k] = first.get(k, 0) + 1
+            pfx, pn = max(first.items(), key=lambda kv: kv[1])
+            if (pn >= 0.8 * len(toks) and not pfx[0].isdigit()
+                    and len(first) <= 2):
+                prefix = pfx
+                toks = [t[1:] if t and t[0].lower() == pfx else t
+                        for t in toks]
+                toks = [t for t in toks if t]
+                if not toks:
+                    continue
+        ncol = max(len(t) for t in toks)
+        if ncol < 2:
+            continue
 
-    def col(i):
-        return [t[i] for t in toks if len(t) > i]
+        def col(i):
+            return [t[i] for t in toks if len(t) > i]
 
-    press_col, press_frac, press_dec = None, 0.0, "p"
-    for i in range(ncol):
-        if i == 0:
-            continue        # column 0 is the dac id; pressure never lives here
-        vals = col(i)
-        hits, dec_hits = 0, {"p": 0, ".": 0, ",": 0}
-        marked = 0
-        for v in vals:
-            for dec in ("p", ".", ","):
-                ps, _pv = _parse_pressure_token(v, dec, ["gpa", "kbar"])
-                if ps is not None:
-                    hits += 1
-                    dec_hits[dec] += 1
-                    if not v.isdigit():
-                        marked += 1
-                    break
-        frac = hits / float(len(vals) or 1)
-        if hits and not marked:
-            frac *= 0.5     # bare integers alone are a weak pressure signal
-        if frac > max(press_frac, 0.45):
-            press_col, press_frac = i, frac
-            press_dec = max(dec_hits.items(), key=lambda kv: kv[1])[0]
-    role_col, role_frac = None, 0.0
-    for i in range(ncol):
-        if i == press_col:
-            continue
-        vals = [v.lower() for v in col(i)]
-        hits = sum(1 for v in vals if v in ROLE_WORDS)
-        frac = hits / float(len(vals) or 1)
-        if hits >= 2 and frac > role_frac:
-            role_col, role_frac = i, frac
-    branch_col = None
-    for i in range(ncol):
-        if i in (press_col, role_col):
-            continue
-        vals = [v.lower() for v in col(i)]
-        hits = sum(1 for v in vals if v in BRANCH_WORDS)
-        if hits and hits >= 0.5 * len(vals):
-            branch_col = i
-            break
-    rep_col = None
-    for i in range(ncol - 1, 1, -1):
-        if i in (press_col, role_col, branch_col):
-            continue
-        vals = col(i)
-        if vals and all(v.isdigit() and len(v) <= 2 for v in vals):
-            rep_col = i
-            break
-    ids = [i for i in range(ncol)
-           if i not in (press_col, role_col, branch_col, rep_col)]
-    # guess #1: pressure/rep must never steal the dac/sample id columns; if
-    # they left < 2 free columns, release the weakest bare-integer claim.
-    if len(ids) < 2:
-        for _rel in ("rep_col", "press_col"):
-            if len(ids) >= 2:
+        press_col, press_frac, press_dec = None, 0.0, "p"
+        for i in range(ncol):
+            if i == 0:
+                continue        # column 0 is the dac id; pressure never lives here
+            vals = col(i)
+            hits, dec_hits = 0, {"p": 0, ".": 0, ",": 0}
+            marked = 0
+            for v in vals:
+                for dec in ("p", ".", ","):
+                    ps, _pv = _parse_pressure_token(v, dec, ["gpa", "kbar"])
+                    if ps is not None:
+                        hits += 1
+                        dec_hits[dec] += 1
+                        if not v.isdigit():
+                            marked += 1
+                        break
+            frac = hits / float(len(vals) or 1)
+            if hits and not marked:
+                frac *= 0.5     # bare integers alone are a weak pressure signal
+            if frac > max(press_frac, 0.45):
+                press_col, press_frac = i, frac
+                press_dec = max(dec_hits.items(), key=lambda kv: kv[1])[0]
+        role_col, role_frac = None, 0.0
+        for i in range(ncol):
+            if i == press_col:
+                continue
+            vals = [v.lower() for v in col(i)]
+            hits = sum(1 for v in vals if v in ROLE_WORDS)
+            frac = hits / float(len(vals) or 1)
+            if hits >= 2 and frac > role_frac:
+                role_col, role_frac = i, frac
+        branch_col = None
+        for i in range(ncol):
+            if i in (press_col, role_col):
+                continue
+            vals = [v.lower() for v in col(i)]
+            hits = sum(1 for v in vals if v in BRANCH_WORDS)
+            if hits and hits >= 0.5 * len(vals):
+                branch_col = i
                 break
-            if _rel == "rep_col" and rep_col is not None:
-                rep_col = None
-            elif _rel == "press_col" and press_col is not None and press_frac <= 0.5:
-                press_col = None
-            ids = [i for i in range(ncol)
-                   if i not in (press_col, role_col, branch_col, rep_col)]
-    if len(ids) < 2:
+        rep_col = None
+        for i in range(ncol - 1, 1, -1):
+            if i in (press_col, role_col, branch_col):
+                continue
+            vals = col(i)
+            if vals and all(v.isdigit() and len(v) <= 2 for v in vals):
+                rep_col = i
+                break
+        ids = [i for i in range(ncol)
+               if i not in (press_col, role_col, branch_col, rep_col)]
+        # guess #1: pressure/rep must never steal the dac/sample id columns; if
+        # they left < 2 free columns, release the weakest bare-integer claim.
+        if len(ids) < 2:
+            for _rel in ("rep_col", "press_col"):
+                if len(ids) >= 2:
+                    break
+                if _rel == "rep_col" and rep_col is not None:
+                    rep_col = None
+                elif _rel == "press_col" and press_col is not None and press_frac <= 0.5:
+                    press_col = None
+                ids = [i for i in range(ncol)
+                       if i not in (press_col, role_col, branch_col, rep_col)]
+        if len(ids) < 2:
+            continue
+        picked = ids
+        break
+    if picked is None:
         return default_profile(name), 0
+    ids = picked
     dac_col, sample_col = ids[0], ids[1]
     order = []
     for i in range(ncol):
@@ -548,7 +699,7 @@ def guess_profile(fnames, name="guessed"):
         "pressure_unit_strip": ["gpa", "kbar"],
         "role_map": role_map,
         "branch_tokens": branch_tokens,
-        "seq_sep": ".", "seq_missing": 1,
+        "seq_sep": g_sep, "seq_scheme": g_scheme, "seq_missing": g_missing,
         "defaults": {"pressure": 0.0, "role": "dark", "rep": 1},
     }
     if validate_profile(prof):
